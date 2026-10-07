@@ -1,56 +1,31 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>Profile #{{.Profile.ID}} — fenrirealm-monitor</title>
-  <style>
-    body { font-family: system-ui, sans-serif; margin: 2rem; background: #0d1117; color: #e6edf3; }
-    table { border-collapse: collapse; width: 100%; }
-    th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #21262d; }
-    a { color: #58a6ff; text-decoration: none; }
-    .badge { background: #21262d; border-radius: 4px; padding: 0.1rem 0.4rem; font-size: 0.85em; }
-  </style>
-</head>
-<body>
-  <p><a href="/profiles">← All profiles</a></p>
-  <h1>{{.Profile.Name}}</h1>
-  <p>
-    <span class="badge">{{.Profile.Type}}</span>
-    <span class="badge">{{.Profile.ProjectKey}}</span>
-    <span class="badge">{{printf "%.1f ms" .Profile.DurationMs}}</span>
-    <span class="badge">{{.Profile.Environment}}</span>
-    <span class="badge">{{.Profile.CreatedAt.Format "2006-01-02 15:04:05"}}</span>
-  </p>
-  {{if .Profile.Hotspots}}
-  <h2>Hotspots (self time, slowest first)</h2>
-  <table>
-    <thead><tr><th>Function</th><th>File</th><th>Self</th><th>Calls</th></tr></thead>
-    <tbody>
-      {{range .Profile.Hotspots}}
-      <tr>
-        <td>{{.Function}}</td>
-        <td>{{.File}}</td>
-        <td>{{printf "%.1f ms" .SelfMs}}</td>
-        <td>{{.Calls}}</td>
-      </tr>
-      {{end}}
-    </tbody>
-  </table>
-  {{end}}
-  {{if .Profile.Spans}}
-  <h2>Spans</h2>
-  <table>
-    <thead><tr><th>Span</th><th>Duration</th><th>Tags</th></tr></thead>
-    <tbody>
-      {{range .Profile.Spans}}
-      <tr>
-        <td>{{.Name}}</td>
-        <td>{{printf "%.1f ms" .DurationMs}}</td>
-        <td>{{printf "%v" .Tags}}</td>
-      </tr>
-      {{end}}
-    </tbody>
-  </table>
-  {{end}}
-</body>
-</html>
+{{define "title"}}{{.Profile.Name}} — fenrirealm-monitor{{end}}
+{{define "content"}}
+<p><a href="/profiles?project={{.Profile.ProjectKey}}">← Profiles</a></p>
+<h1>{{.Profile.Name}}</h1>
+<p class="meta">
+  <span class="badge">{{.Profile.Type}}</span>
+  {{if .Profile.Environment}}<span class="badge">{{.Profile.Environment}}</span>{{end}}
+  <span class="badge">{{ms .Profile.DurationMs}}</span>
+  <span class="faint" title="{{.Profile.CreatedAt.Format "2006-01-02 15:04:05"}}">{{rel .Profile.CreatedAt}}</span>
+</p>
+{{if .SpanRows}}
+<h2>Span waterfall</h2>
+{{range .SpanRows}}
+<div class="bar-row">
+  <div class="mono dim">{{.Name}}</div>
+  <div class="track"><span class="fill wf-fill" style="left:{{.Left}}%;width:{{.Width}}%"></span></div>
+  <div class="num mono dim">{{ms .DurationMs}}</div>
+</div>
+{{end}}
+{{end}}
+{{if .Profile.Hotspots}}
+<h2>Hotspots (self time)</h2>
+{{range .Profile.Hotspots}}
+<div class="bar-row">
+  <div class="mono">{{.Function}}{{if .File}} <span class="faint">{{.File}}</span>{{end}}</div>
+  <div class="track"><span class="fill hot-fill" style="width:{{pct .SelfMs $.MaxSelf}}%"></span></div>
+  <div class="num mono dim">{{ms .SelfMs}}{{if .Calls}} · {{.Calls}}×{{end}}</div>
+</div>
+{{end}}
+{{end}}
+{{end}}

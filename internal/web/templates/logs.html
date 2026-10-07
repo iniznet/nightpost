@@ -1,0 +1,39 @@
+{{define "title"}}Logs — fenrirealm-monitor{{end}}
+{{define "extrahead"}}<meta http-equiv="refresh" content="15">{{end}}
+{{define "content"}}
+<h1>Logs</h1>
+<div class="filterbar">
+  <span class="label">level</span>
+  <a href="?project={{.Project}}" class="pill{{if eq .Filter.Level ""}} on{{end}}">all</a>
+  {{range .Levels}}<a href="?project={{$.Project}}&level={{.Level}}" class="pill{{if eq $.Filter.Level .Level}} on{{end}}">{{.Level}} <span class="faint">{{.Count}}</span></a>{{end}}
+</div>
+<form class="filterbar" method="get" action="/logs">
+  <input type="hidden" name="project" value="{{.Project}}">
+  {{if .Filter.Level}}<input type="hidden" name="level" value="{{.Filter.Level}}">{{end}}
+  <input type="search" name="q" value="{{.Filter.Q}}" placeholder="Search messages">
+  <input name="channel" value="{{.Filter.Channel}}" placeholder="channel">
+  <select name="env">
+    <option value="">env: all</option>
+    {{range .Envs}}<option value="{{.}}"{{if eq . $.Filter.Env}} selected{{end}}>{{.}}</option>{{end}}
+  </select>
+  <button>Apply</button>
+</form>
+{{if .Issues}}
+<table>
+<thead><tr><th>Message</th><th>Channel</th><th>Level</th><th>Env</th><th>Count</th><th>Last seen</th></tr></thead>
+<tbody>
+{{range .Issues}}
+<tr>
+  <td><a href="/issues/{{.ID}}">{{.Title}}</a></td>
+  <td class="mono dim">{{or .Channel "—"}}</td>
+  <td><span class="badge lvl-{{.Level}}">{{or .Level "info"}}</span></td>
+  <td class="dim">{{or .Environment "—"}}</td>
+  <td class="num">{{.Count}}</td>
+  <td class="dim" title="{{.LastSeenAt.Format "2006-01-02 15:04:05"}}">{{rel .LastSeenAt}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{else}}<p class="empty">No log events match.</p>{{end}}
+{{if .NextURL}}<p class="pager"><a href="{{.NextURL}}">Older →</a></p>{{end}}
+{{end}}

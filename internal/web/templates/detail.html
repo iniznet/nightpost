@@ -1,34 +1,35 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>Issue #{{.Issue.ID}} — fenrirealm-monitor</title>
-  <style>
-    body { font-family: system-ui, sans-serif; margin: 2rem; background: #0d1117; color: #e6edf3; }
-    pre { background: #161b22; padding: 1rem; border-radius: 6px; overflow-x: auto; }
-    a { color: #58a6ff; text-decoration: none; }
-    .badge { background: #21262d; border-radius: 4px; padding: 0.1rem 0.4rem; font-size: 0.85em; }
-    form { display: inline; }
-  </style>
-</head>
-<body>
-  <p><a href="/">← All issues</a></p>
-  <h1>{{.Issue.Title}}</h1>
-  <p>
-    <span class="badge">{{.Issue.Type}}</span>
-    <span class="badge">{{.Issue.ExceptionClass}}</span>
-    <span class="badge">{{.Issue.Level}}</span>
-    <span class="badge">{{.Issue.Environment}}</span>
-    <span class="badge">count {{.Issue.Count}}</span>
-    <span class="badge">first {{.Issue.FirstSeenAt.Format "2006-01-02 15:04:05"}}</span>
-    <span class="badge">last {{.Issue.LastSeenAt.Format "2006-01-02 15:04:05"}}</span>
-  </p>
-  <form method="post" action="/issues/{{.Issue.ID}}/resolve"><button>Resolve</button></form>
-  <form method="post" action="/issues/{{.Issue.ID}}/reopen"><button>Reopen</button></form>
-  <h2>Recent occurrences</h2>
-  {{range .Occurrences}}
-    <p><span class="badge">{{index . "seen_at"}}</span></p>
-    <pre>{{printf "%v" (index . "payload")}}</pre>
+{{define "title"}}{{.Issue.Title}} — fenrirealm-monitor{{end}}
+{{define "content"}}
+<p><a href="/issues?project={{.Issue.ProjectKey}}">← Issues</a></p>
+<h1>{{.Issue.Title}}</h1>
+<p class="meta">
+  <span class="badge">{{.Issue.Type}}</span>
+  {{if .Issue.ExceptionClass}}<span class="badge mono">{{.Issue.ExceptionClass}}</span>{{end}}
+  <span class="badge lvl-{{.Issue.Level}}">{{or .Issue.Level "error"}}</span>
+  {{if .Issue.Environment}}<span class="badge">{{.Issue.Environment}}</span>{{end}}
+  {{if .Issue.Channel}}<span class="badge mono">{{.Issue.Channel}}</span>{{end}}
+  <span class="badge">count {{.Issue.Count}}</span>
+  <span class="faint">first {{rel .Issue.FirstSeenAt}} · last {{rel .Issue.LastSeenAt}}</span>
+</p>
+<div class="actions">
+  {{if .Issue.Resolved}}
+  <span class="badge ok">resolved</span>
+  <form class="inline" method="post" action="/issues/{{.Issue.ID}}/reopen"><button>Reopen</button></form>
+  {{else}}
+  <form class="inline" method="post" action="/issues/{{.Issue.ID}}/resolve"><button>Resolve</button></form>
   {{end}}
-</body>
-</html>
+</div>
+<h2>Recent occurrences</h2>
+{{range .Views}}
+<details class="occ" open>
+  <summary><span class="mono dim">{{.When}}</span><span class="badge">{{.Kind}}</span>{{if .Title}}<span class="occ-title">{{.Title}}</span>{{end}}</summary>
+  <div class="body">
+    {{if .Fields}}<div class="kv">{{range .Fields}}<span class="k">{{.K}}</span><span class="v">{{.V}}</span>{{end}}</div>{{end}}
+    {{if .Stack}}<div class="stack">{{range .Stack}}<div class="frame"><span class="fn">{{if .Func}}{{.Func}}{{else}}?{{end}}</span><span class="loc">{{if .File}}{{.File}}:{{.Line}}{{else}}—{{end}}</span></div>{{end}}</div>{{end}}
+    {{if .Raw}}<details><summary class="raw-toggle">raw payload</summary><pre>{{.Raw}}</pre></details>{{end}}
+  </div>
+</details>
+{{else}}
+<p class="empty">No occurrences stored.</p>
+{{end}}
+{{end}}

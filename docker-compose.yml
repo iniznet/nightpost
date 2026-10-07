@@ -18,7 +18,10 @@
 # or run a one-off `docker compose up` override that adds a ports: mapping.
 #
 # Persistence: profiles + issues are only as useful as their history — the
-# named volume is the retention policy (prune cap lives in the app).
+# named volume is the retention policy. Inside the app the retention loop
+# prunes occurrences older than -retention-days (default 30), caps each
+# issue's occurrence history at 50 and keeps the newest 5000 profiles.
+# Tighten with -retention-days / -prune-interval in the service command.
 
 services:
   monitor:
