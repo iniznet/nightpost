@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # fenrirealm-monitor — single-instance ingest (sqlite; never scale replicas).
 #
 # Backend producers reach this service BY HOSTNAME: the backend compose
@@ -7,10 +8,33 @@
 #    drop the ports: mapping (ingest stays private to the Docker network;
 #    reach the UI through the proxy).
 # 2) Own stack (this file as-is): the published 8000 port serves UI + ingest.
+=======
+# fenrirealm-monitor — the sink every platform sender points at
+# (iniznet/fenrirealm-tracker#145). Replaces the retired third-party server:
+# one static Go binary, real SQLite volume (state SURVIVES restarts — the old
+# sink was deliberately in-memory), UI bound to HOST LOOPBACK only.
+#
+# Deploy topology: the container joins dokploy-network so the backend stack's
+# senders target it by service name — the exact defaults already committed to
+# the backend compose:
+#   MONITOR_LOG_SOCKET_URL=monitor:9913
+#   PROFILER_ENDPOINT=http://backend@monitor:8000/api/profiler/store
+#   SENTRY_LARAVEL_DSN=http://backend@monitor:8000/1
+#   MONITOR_ENDPOINT=http://monitor:8000  (Laravel MonitorClient)
+#   MONITOR_URL=http://monitor:8000       (SvelteKit reporter)
+#
+# UI: bound to HOST LOOPBACK ONLY (reach it via `ssh -L 8001:127.0.0.1:8001
+# <node>`); it has no auth and must never ride Dokploy ingress. MONITOR_UI_PORT
+# defaults to 8001 so it never collides with anything the old sink bound.
+#
+# Persistence: profiles + issues are only as useful as their history — the
+# named volume is the retention policy (prune cap lives in the app).
+>>>>>>> d6fc871 (feat(deploy): Dockerfile + compose service — loopback UI, dokploy-network senders, persistent volume (#145))
 
 services:
   monitor:
     build: .
+<<<<<<< HEAD
     image: iniznet/fenrirealm-monitor:latest
     container_name: fenrirealm-monitor
     restart: unless-stopped
@@ -35,3 +59,38 @@ services:
 
 volumes:
   monitor-data:
+=======
+    image: fenrirealm-monitor:latest
+    container_name: fenrirealm-monitor-${APP_ENV:-production}
+    restart: unless-stopped
+    ports:
+      # Host loopback only — see the UI note above.
+      - "127.0.0.1:${MONITOR_UI_PORT:-8001}:8000"
+      # Monolog TCP socket: reachable by sender containers on dokploy-network.
+      - "9913"
+    volumes:
+      - monitor-data:/data
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8000/up"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+        compress: "true"
+    networks:
+      - dokploy-network
+
+volumes:
+  monitor-data:
+
+networks:
+  dokploy-network:
+    external: true
+>>>>>>> d6fc871 (feat(deploy): Dockerfile + compose service — loopback UI, dokploy-network senders, persistent volume (#145))
