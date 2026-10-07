@@ -1,0 +1,8 @@
+# never bake smoke-test artifacts or local build output into the image
+.git/
+*.db
+*.db-*
+*.log
+monitor.exe
+xhprof_payload.json
+docker-compose.yml
