@@ -95,6 +95,29 @@ func (s *Store) RecordProfile(in ProfileInput) (int64, error) {
 	return res.LastInsertId()
 }
 
+// ProfilesByType lists profiles of one type ("request" or "callgraph").
+func (s *Store) ProfilesByType(projectKey, typ string, limit int) ([]Profile, error) {
+	if limit <= 0 || limit > 200 {
+		limit = defaultProfileLimit
+	}
+	rows, err := s.db.Query(`SELECT id, project_key, type, name, duration_ms, environment, spans, hotspots, created_at
+		FROM profiles WHERE type = ? AND (? = '' OR project_key = ?)
+		ORDER BY created_at DESC, id DESC LIMIT ?`, typ, projectKey, projectKey, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Profile
+	for rows.Next() {
+		p, err := scanProfile(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) Profiles(projectKey string, limit int) ([]Profile, error) {
 	if limit <= 0 || limit > 200 {
 		limit = defaultProfileLimit

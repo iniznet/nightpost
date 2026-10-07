@@ -35,7 +35,7 @@ func TestSentryHandlerRecordsException(t *testing.T) {
         t.Fatalf("expected recorded=1, got %s", rec.Body.String())
     }
 
-    issues, err := st.Issues("backend", 10)
+    issues, err := st.Issues(store.IssueQuery{Project: "backend", Limit: 10})
     if err != nil {
         t.Fatalf("issues: %v", err)
     }

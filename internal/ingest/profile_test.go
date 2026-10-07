@@ -96,7 +96,7 @@ func TestErrorHandlerRecordsJSError(t *testing.T) {
         t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
     }
 
-    issues, err := st.Issues("front", 10)
+    issues, err := st.Issues(store.IssueQuery{Project: "front", Limit: 10})
     if err != nil {
         t.Fatalf("issues: %v", err)
     }
