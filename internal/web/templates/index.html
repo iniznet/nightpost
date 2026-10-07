@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>fenrirealm-monitor</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; background: #0d1117; color: #e6edf3; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #21262d; }
+    a { color: #58a6ff; text-decoration: none; }
+    .resolved { opacity: 0.45; }
+    .badge { background: #21262d; border-radius: 4px; padding: 0.1rem 0.4rem; font-size: 0.85em; }
+  </style>
+</head>
+<body>
+  <h1>Issues</h1>
+  <table>
+    <thead>
+      <tr><th>Title</th><th>Type</th><th>Class</th><th>Level</th><th>Env</th><th>Count</th><th>Last seen</th><th>Status</th></tr>
+    </thead>
+    <tbody>
+      {{range .Issues}}
+      <tr class="{{if .Resolved}}resolved{{end}}">
+        <td><a href="/issues/{{.ID}}">{{.Title}}</a></td>
+        <td>{{.Type}}</td>
+        <td>{{.ExceptionClass}}</td>
+        <td>{{.Level}}</td>
+        <td>{{.Environment}}</td>
+        <td>{{.Count}}</td>
+        <td>{{.LastSeenAt.Format "2006-01-02 15:04:05"}}</td>
+        <td>{{if .Resolved}}resolved{{else}}open{{end}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+</body>
+</html>

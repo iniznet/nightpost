@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Profiles — fenrirealm-monitor</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; background: #0d1117; color: #e6edf3; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #21262d; }
+    a { color: #58a6ff; text-decoration: none; }
+    .badge { background: #21262d; border-radius: 4px; padding: 0.1rem 0.4rem; font-size: 0.85em; }
+  </style>
+</head>
+<body>
+  <p><a href="/">← Issues</a> · <a href="/slowest">Slowest code</a></p>
+  <h1>Profiles</h1>
+  <table>
+    <thead>
+      <tr><th>Name</th><th>Type</th><th>Project</th><th>Duration</th><th>Env</th><th>Spans</th><th>Hotspots</th><th>Recorded</th></tr>
+    </thead>
+    <tbody>
+      {{range .Profiles}}
+      <tr>
+        <td><a href="/profiles/{{.ID}}">{{.Name}}</a></td>
+        <td>{{.Type}}</td>
+        <td>{{.ProjectKey}}</td>
+        <td>{{printf "%.1f ms" .DurationMs}}</td>
+        <td>{{.Environment}}</td>
+        <td>{{len .Spans}}</td>
+        <td>{{len .Hotspots}}</td>
+        <td>{{.CreatedAt.Format "2006-01-02 15:04:05"}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+</body>
+</html>

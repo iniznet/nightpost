@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Issue #{{.Issue.ID}} — fenrirealm-monitor</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; background: #0d1117; color: #e6edf3; }
+    pre { background: #161b22; padding: 1rem; border-radius: 6px; overflow-x: auto; }
+    a { color: #58a6ff; text-decoration: none; }
+    .badge { background: #21262d; border-radius: 4px; padding: 0.1rem 0.4rem; font-size: 0.85em; }
+    form { display: inline; }
+  </style>
+</head>
+<body>
+  <p><a href="/">← All issues</a></p>
+  <h1>{{.Issue.Title}}</h1>
+  <p>
+    <span class="badge">{{.Issue.Type}}</span>
+    <span class="badge">{{.Issue.ExceptionClass}}</span>
+    <span class="badge">{{.Issue.Level}}</span>
+    <span class="badge">{{.Issue.Environment}}</span>
+    <span class="badge">count {{.Issue.Count}}</span>
+    <span class="badge">first {{.Issue.FirstSeenAt.Format "2006-01-02 15:04:05"}}</span>
+    <span class="badge">last {{.Issue.LastSeenAt.Format "2006-01-02 15:04:05"}}</span>
+  </p>
+  <form method="post" action="/issues/{{.Issue.ID}}/resolve"><button>Resolve</button></form>
+  <form method="post" action="/issues/{{.Issue.ID}}/reopen"><button>Reopen</button></form>
+  <h2>Recent occurrences</h2>
+  {{range .Occurrences}}
+    <p><span class="badge">{{index . "seen_at"}}</span></p>
+    <pre>{{printf "%v" (index . "payload")}}</pre>
+  {{end}}
+</body>
+</html>

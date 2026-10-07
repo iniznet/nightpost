@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Slowest code — fenrirealm-monitor</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; background: #0d1117; color: #e6edf3; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #21262d; }
+    a { color: #58a6ff; text-decoration: none; }
+    .badge { background: #21262d; border-radius: 4px; padding: 0.1rem 0.4rem; font-size: 0.85em; }
+  </style>
+</head>
+<body>
+  <p><a href="/">← Issues</a> · <a href="/profiles">Profiles</a></p>
+  <h1>Slowest code</h1>
+  <p>Aggregated self-time across recent callgraph profiles{{if .Project}} for <span class="badge">{{.Project}}</span>{{end}}.</p>
+  <table>
+    <thead>
+      <tr><th>Function / file</th><th>Total self</th><th>Samples</th><th>Avg self</th><th>Last seen</th></tr>
+    </thead>
+    <tbody>
+      {{range .Rows}}
+      <tr>
+        <td>{{.Function}}{{if .File}} <span class="badge">{{.File}}</span>{{end}}</td>
+        <td>{{printf "%.1f ms" .TotalSelfMs}}</td>
+        <td>{{.Samples}}</td>
+        <td>{{printf "%.1f ms" .AvgSelfMs}}</td>
+        <td>{{.LastSeen.Format "2006-01-02 15:04"}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+</body>
+</html>
