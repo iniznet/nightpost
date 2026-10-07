@@ -32,11 +32,11 @@ func ProfileHandler(st *store.Store) http.HandlerFunc {
 		}
 
 		var payload struct {
-			Name        string         `json:"name"`
-			DurationMs  float64        `json:"duration_ms"`
-			Environment string         `json:"environment"`
-			Type        string         `json:"type"`
-			Spans       []store.Span   `json:"spans"`
+			Name        string          `json:"name"`
+			DurationMs  float64         `json:"duration_ms"`
+			Environment string          `json:"environment"`
+			Type        string          `json:"type"`
+			Spans       []store.Span    `json:"spans"`
 			Hotspots    []store.Hotspot `json:"hotspots"`
 		}
 		if err := json.Unmarshal(body, &payload); err != nil || payload.Name == "" || payload.DurationMs <= 0 {
@@ -79,7 +79,7 @@ func ErrorHandler(st *store.Store) http.HandlerFunc {
 			http.Error(w, "missing project", http.StatusBadRequest)
 			return
 		}
-		body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+		body, err := io.ReadAll(io.LimitReader(r.Body, 64<<10))
 		if err != nil {
 			http.Error(w, "read body", http.StatusBadRequest)
 			return
@@ -100,10 +100,10 @@ func ErrorHandler(st *store.Store) http.HandlerFunc {
 
 		fp := store.ForException("JSError", payload.Message, topStackLine(payload.Stack))
 		ctx := map[string]any{
-			"url":         payload.URL,
-			"route":       payload.Route,
-			"stack":       payload.Stack,
-			"release":     payload.Release,
+			"url":     payload.URL,
+			"route":   payload.Route,
+			"stack":   truncate(payload.Stack, 16<<10),
+			"release": payload.Release,
 		}
 		if _, err := st.RecordError(projectKey, "JSError", payload.Message, fp, payload.Environment, "error", ctx); err != nil {
 			log.Printf("record js error: %v", err)

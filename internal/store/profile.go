@@ -85,7 +85,7 @@ func (s *Store) RecordProfile(in ProfileInput) (int64, error) {
 	if len(in.Hotspots) > maxProfileHotspots {
 		in.Hotspots = in.Hotspots[:maxProfileHotspots]
 	}
-	res, err := s.db.Exec(`INSERT INTO profiles (project_key, type, name, duration_ms, environment, spans, hotspots, created_at)
+	res, err := s.wdb.Exec(`INSERT INTO profiles (project_key, type, name, duration_ms, environment, spans, hotspots, created_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		in.ProjectKey, in.Type, truncate(in.Name, 240), in.DurationMs, in.Environment,
 		marshalJSON(in.Spans), marshalJSON(in.Hotspots), time.Now().Unix())
@@ -100,7 +100,7 @@ func (s *Store) ProfilesByType(projectKey, typ string, limit int) ([]Profile, er
 	if limit <= 0 || limit > 200 {
 		limit = defaultProfileLimit
 	}
-	rows, err := s.db.Query(`SELECT id, project_key, type, name, duration_ms, environment, spans, hotspots, created_at
+	rows, err := s.rdb.Query(`SELECT id, project_key, type, name, duration_ms, environment, spans, hotspots, created_at
 		FROM profiles WHERE type = ? AND (? = '' OR project_key = ?)
 		ORDER BY created_at DESC, id DESC LIMIT ?`, typ, projectKey, projectKey, limit)
 	if err != nil {
@@ -122,7 +122,7 @@ func (s *Store) Profiles(projectKey string, limit int) ([]Profile, error) {
 	if limit <= 0 || limit > 200 {
 		limit = defaultProfileLimit
 	}
-	rows, err := s.db.Query(`SELECT id, project_key, type, name, duration_ms, environment, spans, hotspots, created_at
+	rows, err := s.rdb.Query(`SELECT id, project_key, type, name, duration_ms, environment, spans, hotspots, created_at
 		FROM profiles WHERE (? = '' OR project_key = ?)
 		ORDER BY created_at DESC, id DESC LIMIT ?`, projectKey, projectKey, limit)
 	if err != nil {
@@ -141,7 +141,7 @@ func (s *Store) Profiles(projectKey string, limit int) ([]Profile, error) {
 }
 
 func (s *Store) Profile(id int64) (*Profile, error) {
-	row := s.db.QueryRow(`SELECT id, project_key, type, name, duration_ms, environment, spans, hotspots, created_at
+	row := s.rdb.QueryRow(`SELECT id, project_key, type, name, duration_ms, environment, spans, hotspots, created_at
 		FROM profiles WHERE id = ?`, id)
 	p, err := scanProfile(row)
 	if err != nil {
@@ -156,7 +156,7 @@ func (s *Store) SlowestCode(projectKey string, sampleLimit int) ([]HotspotAgg, e
 	if sampleLimit <= 0 || sampleLimit > 1000 {
 		sampleLimit = 500
 	}
-	rows, err := s.db.Query(`SELECT hotspots, created_at FROM profiles
+	rows, err := s.rdb.Query(`SELECT hotspots, created_at FROM profiles
 		WHERE type = ? AND (? = '' OR project_key = ?) AND hotspots <> '' AND hotspots IS NOT NULL
 		ORDER BY created_at DESC, id DESC LIMIT ?`, ProfileTypeCallgraph, projectKey, projectKey, sampleLimit)
 	if err != nil {
@@ -165,10 +165,10 @@ func (s *Store) SlowestCode(projectKey string, sampleLimit int) ([]HotspotAgg, e
 	defer rows.Close()
 
 	type agg struct {
-		fn, file    string
-		total       float64
-		samples     int
-		last        time.Time
+		fn, file string
+		total    float64
+		samples  int
+		last     time.Time
 	}
 	byKey := map[string]*agg{}
 	for rows.Next() {
@@ -219,7 +219,7 @@ func (s *Store) PruneProfiles(keep int64) error {
 	if keep <= 0 {
 		keep = 5000
 	}
-	_, err := s.db.Exec(`DELETE FROM profiles WHERE id NOT IN
+	_, err := s.wdb.Exec(`DELETE FROM profiles WHERE id NOT IN
 		(SELECT id FROM profiles ORDER BY created_at DESC, id DESC LIMIT ?)`, keep)
 	return err
 }

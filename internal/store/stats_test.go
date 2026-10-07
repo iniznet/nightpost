@@ -16,11 +16,11 @@ func TestHourBucketsAlignsTrailingWindow(t *testing.T) {
 	}
 	// One occurrence exactly now, one 3 hours ago.
 	now := time.Now().Unix()
-	if _, err := st.db.Exec(`UPDATE occurrences SET seen_at = ?`, now); err != nil {
+	if _, err := st.wdb.Exec(`UPDATE occurrences SET seen_at = ?`, now); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	past := now - 3*3600 - 60
-	if _, err := st.db.Exec(`INSERT INTO occurrences (issue_id, type, payload, seen_at) VALUES (?, 'error', NULL, ?)`, id, past); err != nil {
+	if _, err := st.wdb.Exec(`INSERT INTO occurrences (issue_id, type, payload, seen_at) VALUES (?, 'error', NULL, ?)`, id, past); err != nil {
 		t.Fatalf("seed past: %v", err)
 	}
 

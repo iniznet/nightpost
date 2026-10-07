@@ -5,14 +5,65 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	_ "modernc.org/sqlite"
 )
 
+// Store keeps two pools on the same WAL database: one writer connection
+// (SQLite allows exactly one concurrent writer) and a small reader pool
+// (WAL readers never block the writer or each other). UI queries run on
+// the reader pool so ingest writes can never starve a dashboard render.
 type Store struct {
-	db *sql.DB
+	wdb *sql.DB
+	rdb *sql.DB
+
+	limMu        sync.Mutex
+	limWindows   map[string]*limWindow
+	MaxOccPerMin int
+
+	dropped atomic.Int64
 }
+
+type limWindow struct {
+	minute   int64
+	recorded int
+}
+
+// allowOccurrence admits at most MaxOccPerMin occurrence rows per fingerprint
+// per minute; past the cap the occurrence insert is skipped while the issue
+// upsert still runs, so issue counts stay accurate without row flooding.
+func (s *Store) allowOccurrence(fingerprint string) bool {
+	capPerMin := s.MaxOccPerMin
+	if capPerMin <= 0 {
+		return true
+	}
+	minute := time.Now().Unix() / 60
+	s.limMu.Lock()
+	defer s.limMu.Unlock()
+	w := s.limWindows[fingerprint]
+	if w == nil || w.minute != minute {
+		w = &limWindow{minute: minute}
+		s.limWindows[fingerprint] = w
+	}
+	if w.recorded >= capPerMin {
+		return false
+	}
+	w.recorded++
+	if len(s.limWindows) > 4096 {
+		for k, lw := range s.limWindows {
+			if lw.minute != minute {
+				delete(s.limWindows, k)
+			}
+		}
+	}
+	return true
+}
+
+// DroppedOccurrences reports occurrence inserts skipped by the cap.
+func (s *Store) DroppedOccurrences() int64 { return s.dropped.Load() }
 
 type Issue struct {
 	ID             int64
@@ -30,13 +81,23 @@ type Issue struct {
 	Resolved       bool
 }
 
+const dsnPragmas = "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)&_pragma=wal_autocheckpoint(1000)"
+
 func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
+	wdb, err := sql.Open("sqlite", path+dsnPragmas)
 	if err != nil {
-		return nil, fmt.Errorf("open sqlite: %w", err)
+		return nil, fmt.Errorf("open sqlite writer: %w", err)
 	}
-	// Single writer process; a single connection keeps SQLite serialization simple.
-	db.SetMaxOpenConns(1)
+	// SQLite allows exactly one concurrent writer: one connection.
+	wdb.SetMaxOpenConns(1)
+	rdb, err := sql.Open("sqlite", path+dsnPragmas+"&_pragma=cache_size(-65536)")
+	if err != nil {
+		wdb.Close()
+		return nil, fmt.Errorf("open sqlite reader: %w", err)
+	}
+	// WAL readers are safe concurrently; four connections cover the UI pages.
+	rdb.SetMaxOpenConns(4)
+	rdb.SetMaxIdleConns(4)
 	schema := `
 CREATE TABLE IF NOT EXISTS issues (
 	id INTEGER PRIMARY KEY,
@@ -76,15 +137,17 @@ CREATE TABLE IF NOT EXISTS occurrences (
 	seen_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_occurrences_issue ON occurrences(issue_id, seen_at DESC);`
-	if _, err := db.Exec(schema); err != nil {
-		db.Close()
+	if _, err := wdb.Exec(schema); err != nil {
+		wdb.Close()
+		rdb.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
-	if err := migrate(db); err != nil {
-		db.Close()
+	if err := migrate(wdb); err != nil {
+		wdb.Close()
+		rdb.Close()
 		return nil, err
 	}
-	return &Store{db: db}, nil
+	return &Store{wdb: wdb, rdb: rdb, limWindows: map[string]*limWindow{}, MaxOccPerMin: 30}, nil
 }
 
 // migrate applies additive migrations idempotently: pre-channel databases
@@ -107,25 +170,36 @@ func migrate(db *sql.DB) error {
 	return nil
 }
 
-func (s *Store) Close() error { return s.db.Close() }
+func (s *Store) Close() error {
+	err := s.wdb.Close()
+	if err2 := s.rdb.Close(); err == nil {
+		err = err2
+	}
+	return err
+}
 
 // RecordError stores one exception occurrence, folding it into an existing
 // issue with the same fingerprint (count+1, last_seen_at bumped) or creating
 // a new issue row.
 func (s *Store) RecordError(projectKey, exceptionClass, message, fingerprint, environment, level string, payload any) (int64, error) {
 	now := time.Now().Unix()
-	res, err := s.db.Exec(`INSERT INTO issues
+	// RETURNING id, not LastInsertId: an upsert that took the conflict
+	// branch performs no insert, so the connection-wide last-insert rowid
+	// still points at the previous occurrence row from another table.
+	var issueID int64
+	err := s.wdb.QueryRow(`INSERT INTO issues
 		(project_key, fingerprint, type, title, exception_class, level, environment, count, first_seen_at, last_seen_at)
 		VALUES (?, ?, 'error', ?, ?, ?, ?, 1, ?, ?)
 		ON CONFLICT(project_key, fingerprint) DO UPDATE SET
-			count = count + 1, last_seen_at = excluded.last_seen_at`,
-		projectKey, fingerprint, truncate(message, 240), exceptionClass, level, environment, now, now)
+			count = count + 1, last_seen_at = excluded.last_seen_at
+		RETURNING id`,
+		projectKey, fingerprint, truncate(message, 240), exceptionClass, level, environment, now, now).Scan(&issueID)
 	if err != nil {
 		return 0, fmt.Errorf("upsert issue: %w", err)
 	}
-	issueID, err := res.LastInsertId()
-	if err != nil {
-		return 0, err
+	if !s.allowOccurrence(fingerprint) {
+		s.dropped.Add(1)
+		return issueID, nil
 	}
 	if err := s.insertOccurrence(issueID, "error", payload, now); err != nil {
 		return issueID, err
@@ -138,20 +212,22 @@ func (s *Store) RecordError(projectKey, exceptionClass, message, fingerprint, en
 func (s *Store) RecordLog(projectKey, channel, level, message string, context map[string]any, environment string) (int64, error) {
 	fp := ForLog(channel, level, message)
 	now := time.Now().Unix()
-	res, err := s.db.Exec(`INSERT INTO issues
+	var issueID int64
+	err := s.wdb.QueryRow(`INSERT INTO issues
 		(project_key, fingerprint, type, title, exception_class, level, environment, channel, count, first_seen_at, last_seen_at)
 		VALUES (?, ?, 'log', ?, NULL, ?, ?, ?, 1, ?, ?)
 		ON CONFLICT(project_key, fingerprint) DO UPDATE SET
-			count = count + 1, last_seen_at = excluded.last_seen_at`,
-		projectKey, fp, truncate(message, 240), level, environment, channel, now, now)
+			count = count + 1, last_seen_at = excluded.last_seen_at
+		RETURNING id`,
+		projectKey, fp, truncate(message, 240), level, environment, channel, now, now).Scan(&issueID)
 	if err != nil {
 		return 0, fmt.Errorf("upsert issue: %w", err)
 	}
-	issueID, err := res.LastInsertId()
-	if err != nil {
-		return 0, err
-	}
 	payload := map[string]any{"channel": channel, "context": context}
+	if !s.allowOccurrence(fp) {
+		s.dropped.Add(1)
+		return issueID, nil
+	}
 	if err := s.insertOccurrence(issueID, "log", payload, now); err != nil {
 		return issueID, err
 	}
@@ -168,8 +244,8 @@ func (s *Store) insertOccurrence(issueID int64, kind string, payload any, now in
 			raw = string(b)
 		}
 	}
-	_, err := s.db.Exec(`INSERT INTO occurrences (issue_id, type, payload, seen_at) VALUES (?, ?, ?, ?)`,
-		issueID, kind, raw, now)
+	_, err := s.wdb.Exec(`INSERT INTO occurrences (issue_id, type, payload, seen_at) VALUES (?, ?, ?, ?)`,
+		issueID, kind, truncate(raw, 32<<10), now)
 	if err != nil {
 		return fmt.Errorf("insert occurrence: %w", err)
 	}
@@ -190,7 +266,7 @@ func (s *Store) Issues(q IssueQuery) ([]Issue, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	rows, err := s.db.Query(`SELECT id, project_key, fingerprint, type, title, exception_class, level, environment, channel, count, first_seen_at, last_seen_at, resolved
+	rows, err := s.rdb.Query(`SELECT id, project_key, fingerprint, type, title, exception_class, level, environment, channel, count, first_seen_at, last_seen_at, resolved
 		FROM issues
 		WHERE (? = '' OR project_key = ?)
 		  AND (? = '' OR type = ?)
@@ -231,7 +307,7 @@ func (s *Store) Issues(q IssueQuery) ([]Issue, error) {
 
 // Projects lists every project key that has ever been seen on either table.
 func (s *Store) Projects() ([]string, error) {
-	rows, err := s.db.Query(`SELECT DISTINCT project_key FROM (
+	rows, err := s.rdb.Query(`SELECT DISTINCT project_key FROM (
 		SELECT project_key FROM issues
 		UNION ALL
 		SELECT project_key FROM profiles
@@ -253,7 +329,7 @@ func (s *Store) Projects() ([]string, error) {
 
 // Environments lists distinct non-empty environments for the filter dropdown.
 func (s *Store) Environments(project string) ([]string, error) {
-	rows, err := s.db.Query(`SELECT DISTINCT environment FROM issues
+	rows, err := s.rdb.Query(`SELECT DISTINCT environment FROM issues
 		WHERE environment IS NOT NULL AND environment <> '' AND (? = '' OR project_key = ?)
 		ORDER BY environment LIMIT 20`, project, project)
 	if err != nil {
@@ -275,7 +351,7 @@ func (s *Store) Issue(id int64) (*Issue, error) {
 	var i Issue
 	var first, last int64
 	var exc, level, env, channel sql.NullString
-	err := s.db.QueryRow(`SELECT id, project_key, fingerprint, type, title, exception_class, level, environment, channel, count, first_seen_at, last_seen_at, resolved
+	err := s.rdb.QueryRow(`SELECT id, project_key, fingerprint, type, title, exception_class, level, environment, channel, count, first_seen_at, last_seen_at, resolved
 		FROM issues WHERE id = ?`, id).
 		Scan(&i.ID, &i.ProjectKey, &i.Fingerprint, &i.Type, &i.Title, &exc, &level, &env, &channel, &i.Count, &first, &last, &i.Resolved)
 	if err != nil {
@@ -290,7 +366,7 @@ func (s *Store) Occurrences(issueID int64, limit int) ([]map[string]any, error) 
 	if limit <= 0 || limit > 100 {
 		limit = 20
 	}
-	rows, err := s.db.Query(`SELECT payload, seen_at FROM occurrences WHERE issue_id = ? ORDER BY seen_at DESC, id DESC LIMIT ?`, issueID, limit)
+	rows, err := s.rdb.Query(`SELECT payload, seen_at FROM occurrences WHERE issue_id = ? ORDER BY seen_at DESC, id DESC LIMIT ?`, issueID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -315,7 +391,7 @@ func (s *Store) Occurrences(issueID int64, limit int) ([]map[string]any, error) 
 }
 
 func (s *Store) SetResolved(id int64, resolved bool) error {
-	_, err := s.db.Exec(`UPDATE issues SET resolved = ? WHERE id = ?`, resolved, id)
+	_, err := s.wdb.Exec(`UPDATE issues SET resolved = ? WHERE id = ?`, resolved, id)
 	return err
 }
 
@@ -324,4 +400,36 @@ func truncate(s string, n int) string {
 		return s[:n]
 	}
 	return s
+}
+
+// StoreStats is the dashboard health strip for the store itself.
+type StoreStats struct {
+	Issues             int64
+	Occurrences        int64
+	Profiles           int64
+	DBBytes            int64
+	DroppedOccurrences int64
+}
+
+// Stats reads table counts and the physical DB size. Counts run on the
+// reader pool; a growing occurrences COUNT is itself the signal to surface.
+func (s *Store) Stats() (StoreStats, error) {
+	var out StoreStats
+	out.DroppedOccurrences = s.dropped.Load()
+	if err := s.rdb.QueryRow(`SELECT COUNT(*) FROM issues`).Scan(&out.Issues); err != nil {
+		return out, err
+	}
+	if err := s.rdb.QueryRow(`SELECT COUNT(*) FROM occurrences`).Scan(&out.Occurrences); err != nil {
+		return out, err
+	}
+	if err := s.rdb.QueryRow(`SELECT COUNT(*) FROM profiles`).Scan(&out.Profiles); err != nil {
+		return out, err
+	}
+	var pages, pageSize int64
+	if err := s.rdb.QueryRow(`PRAGMA page_count`).Scan(&pages); err == nil {
+		if err2 := s.rdb.QueryRow(`PRAGMA page_size`).Scan(&pageSize); err2 == nil {
+			out.DBBytes = pages * pageSize
+		}
+	}
+	return out, nil
 }
