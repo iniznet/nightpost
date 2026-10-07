@@ -12,9 +12,10 @@
 #   MONITOR_ENDPOINT=http://monitor:8000  (Laravel MonitorClient)
 #   MONITOR_URL=http://monitor:8000       (SvelteKit reporter)
 #
-# UI: bound to HOST LOOPBACK ONLY (reach it via `ssh -L 8001:127.0.0.1:8001
-# <node>`); it has no auth and must never ride Dokploy ingress. MONITOR_UI_PORT
-# defaults to 8001 so it never collides with anything the old sink bound.
+# UI: NOT published to the host — it has no auth and must never ride Dokploy
+# ingress. Reach it through the docker network or ad hoc:
+#   docker exec fenrirealm-monitor-production wget -qO- http://127.0.0.1:8000/up
+# or run a one-off `docker compose up` override that adds a ports: mapping.
 #
 # Persistence: profiles + issues are only as useful as their history — the
 # named volume is the retention policy (prune cap lives in the app).
@@ -25,11 +26,10 @@ services:
     image: fenrirealm-monitor:latest
     container_name: fenrirealm-monitor-${APP_ENV:-production}
     restart: unless-stopped
-    ports:
-      # Host loopback only — see the UI note above.
-      - "127.0.0.1:${MONITOR_UI_PORT:-8001}:8000"
-      # Monolog TCP socket: reachable by sender containers on dokploy-network.
-      - "9913"
+    # NO host port publishing: every consumer (Monolog senders, Laravel
+    # MonitorClient, SvelteKit reporter) reaches the service by name over
+    # dokploy-network; host bindings would fight other projects' published
+    # ports on the shared node (observed: 127.0.0.1:8001 already allocated).
     volumes:
       - monitor-data:/data
     environment:
