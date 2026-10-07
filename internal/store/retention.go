@@ -17,7 +17,7 @@ func (s *Store) PruneOccurrencesBefore(cutoff time.Time, chunk int) (int64, erro
 	}
 	var total int64
 	for {
-		res, err := s.db.Exec(`DELETE FROM occurrences WHERE id IN
+		res, err := s.wdb.Exec(`DELETE FROM occurrences WHERE id IN
 			(SELECT id FROM occurrences WHERE seen_at < ? LIMIT ?)`, cutoff.Unix(), chunk)
 		if err != nil {
 			return total, fmt.Errorf("prune occurrences: %w", err)
@@ -39,7 +39,7 @@ func (s *Store) PruneIssueOccurrences(keep int) (int64, error) {
 	if keep <= 0 {
 		keep = 50
 	}
-	ids, err := s.db.Query(`SELECT id FROM issues`)
+	ids, err := s.rdb.Query(`SELECT id FROM issues`)
 	if err != nil {
 		return 0, err
 	}
@@ -60,7 +60,7 @@ func (s *Store) PruneIssueOccurrences(keep int) (int64, error) {
 
 	var total int64
 	for _, id := range issueIDs {
-		res, err := s.db.Exec(`DELETE FROM occurrences WHERE issue_id = ? AND id NOT IN
+		res, err := s.wdb.Exec(`DELETE FROM occurrences WHERE issue_id = ? AND id NOT IN
 			(SELECT id FROM occurrences WHERE issue_id = ? ORDER BY seen_at DESC, id DESC LIMIT ?)`,
 			id, id, keep)
 		if err != nil {
@@ -92,6 +92,9 @@ func (s *Store) RunRetention(days int, keepProfiles int) (string, error) {
 	}
 	if err := s.PruneProfiles(int64(keepProfiles)); err != nil {
 		return "", err
+	}
+	if rows, err := s.wdb.Query(`PRAGMA wal_checkpoint(TRUNCATE)`); err == nil {
+		rows.Close()
 	}
 	return fmt.Sprintf("retention: pruned %d old + %d over-cap occurrences, profiles kept <= %d", n1, n2, keepProfiles), nil
 }

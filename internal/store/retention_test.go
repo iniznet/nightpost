@@ -1,15 +1,15 @@
 package store
 
 import (
-	"time"
 	"testing"
+	"time"
 )
 
 func seedOccurrences(t *testing.T, st *Store, issueID int64, count int, ageDays int) {
 	t.Helper()
 	seen := time.Now().AddDate(0, 0, -ageDays).Unix()
 	for i := 0; i < count; i++ {
-		if _, err := st.db.Exec(`INSERT INTO occurrences (issue_id, type, payload, seen_at) VALUES (?, 'error', NULL, ?)`, issueID, seen-int64(i)); err != nil {
+		if _, err := st.wdb.Exec(`INSERT INTO occurrences (issue_id, type, payload, seen_at) VALUES (?, 'error', NULL, ?)`, issueID, seen-int64(i)); err != nil {
 			t.Fatalf("seed: %v", err)
 		}
 	}

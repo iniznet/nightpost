@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -22,6 +24,9 @@ func main() {
 	retentionDays := flag.Int("retention-days", 30, "delete occurrences older than this many days (issues are kept)")
 	pruneInterval := flag.Duration("prune-interval", 10*time.Minute, "how often the retention cycle runs")
 	corsOrigin := flag.String("cors-origin", "", "browser origin allowed to POST first-party error/profile reports (empty = no CORS)")
+	occurrenceCap := flag.Int("occurrence-cap", 30, "max occurrence rows stored per issue fingerprint per minute (0 = unlimited)")
+	ingestRate := flag.Float64("ingest-rate", 50, "ingest events per second allowed per project before 429")
+	ingestBurst := flag.Float64("ingest-burst", 100, "ingest burst ceiling per project")
 	flag.Parse()
 
 	st, err := store.Open(*dbPath)
@@ -29,8 +34,11 @@ func main() {
 		log.Fatalf("open store: %v", err)
 	}
 	defer st.Close()
+	st.MaxOccPerMin = *occurrenceCap
+	logDBGuard(*dbPath)
 
 	mon := &ingest.Monolog{Store: st}
+	sh := ingest.NewShaper(*ingestRate, *ingestBurst)
 	go func() {
 		if err := mon.ListenAndServe(*sockAddr); err != nil {
 			log.Printf("monolog socket stopped: %v", err)
@@ -40,18 +48,18 @@ func main() {
 	go retentionLoop(st, *retentionDays, *pruneInterval)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /ingest/{project}/sentry", ingest.SentryHandler(st))
-	mux.HandleFunc("POST /ingest/{project}/profile", ingest.WithCORS(*corsOrigin, ingest.ProfileHandler(st)))
-	mux.HandleFunc("POST /ingest/{project}/error", ingest.WithCORS(*corsOrigin, ingest.ErrorHandler(st)))
-	mux.HandleFunc("POST /ingest/{project}/xhprof", ingest.XHProfHandler(st))
+	mux.HandleFunc("POST /ingest/{project}/sentry", ingest.WithShaper(sh, ingest.SentryHandler(st)))
+	mux.HandleFunc("POST /ingest/{project}/profile", ingest.WithCORS(*corsOrigin, ingest.WithShaper(sh, ingest.ProfileHandler(st))))
+	mux.HandleFunc("POST /ingest/{project}/error", ingest.WithCORS(*corsOrigin, ingest.WithShaper(sh, ingest.ErrorHandler(st))))
+	mux.HandleFunc("POST /ingest/{project}/xhprof", ingest.WithShaper(sh, ingest.XHProfHandler(st)))
 	// Sentry SDK compatibility: sentry-laravel POSTs envelopes to /api/{id}/store.
-	mux.HandleFunc("POST /api/{project}/store", ingest.SentryHandler(st))
-	mux.HandleFunc("POST /api/{project}/store/", ingest.SentryHandler(st))
-	mux.HandleFunc("POST /api/{project}/envelope", ingest.SentryHandler(st))
+	mux.HandleFunc("POST /api/{project}/store", ingest.WithShaper(sh, ingest.SentryHandler(st)))
+	mux.HandleFunc("POST /api/{project}/store/", ingest.WithShaper(sh, ingest.SentryHandler(st)))
+	mux.HandleFunc("POST /api/{project}/envelope", ingest.WithShaper(sh, ingest.SentryHandler(st)))
 	// spiral-packages/profiler compatibility: PROFILER_ENDPOINT posts here
 	// (project key = HTTP Basic username, e.g. http://backend@monitor:8000/...).
-	mux.HandleFunc("POST /api/profiler/store", ingest.XHProfHandler(st))
-	mux.HandleFunc("POST /api/{project}/profiler/store", ingest.XHProfHandler(st))
+	mux.HandleFunc("POST /api/profiler/store", ingest.WithShaper(sh, ingest.XHProfHandler(st)))
+	mux.HandleFunc("POST /api/{project}/profiler/store", ingest.WithShaper(sh, ingest.XHProfHandler(st)))
 	// Browser preflight for the first-party reporter endpoints.
 	mux.HandleFunc("OPTIONS /ingest/{project}/error", ingest.PreflightHandler(*corsOrigin))
 	mux.HandleFunc("OPTIONS /ingest/{project}/profile", ingest.PreflightHandler(*corsOrigin))
@@ -64,6 +72,7 @@ func main() {
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-stop
+		_ = mon.Stop()
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(ctx)
@@ -73,6 +82,51 @@ func main() {
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("http server: %v", err)
 	}
+}
+
+type mountPoint struct{ dir, fstype string }
+
+// logDBGuard prints the resolved DB path and the filesystem mount holding
+// it, warning loudly when the database would live in the container layer
+// and be wiped by the next deploy (#159).
+func logDBGuard(dbPath string) {
+	abs, err := filepath.Abs(dbPath)
+	if err != nil {
+		log.Printf("db path: %s (unresolved: %v)", dbPath, err)
+		return
+	}
+	log.Printf("db path: %s", abs)
+	m := dbMount(abs)
+	if m == nil {
+		return
+	}
+	if m.dir == "/" && m.fstype == "overlay" {
+		log.Printf("WARNING: db %s sits on the container layer (%s) — data will not survive container replacement", abs, m.fstype)
+		return
+	}
+	log.Printf("db mount: %s (%s) — persistent", m.dir, m.fstype)
+}
+
+// dbMount finds the deepest /proc/mounts entry containing the path's
+// directory; nil when it cannot be determined (non-Linux, unreadable file),
+// which callers treat as unknown rather than unsafe.
+func dbMount(path string) *mountPoint {
+	data, err := os.ReadFile("/proc/mounts")
+	if err != nil {
+		return nil
+	}
+	dir := filepath.Dir(path)
+	var best *mountPoint
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		if strings.HasPrefix(dir, fields[1]) && (best == nil || len(fields[1]) > len(best.dir)) {
+			best = &mountPoint{dir: fields[1], fstype: fields[2]}
+		}
+	}
+	return best
 }
 
 // retentionLoop keeps the store bounded: occurrences age out, per-issue

@@ -44,7 +44,7 @@ func (s *Store) HourBuckets(project string, hours int, typ string) ([]int64, err
 	}
 	now := time.Now().Unix()
 	cutoff := now - int64(hours)*3600
-	rows, err := s.db.Query(`SELECT (o.seen_at/3600)*3600 AS b, COUNT(*)
+	rows, err := s.rdb.Query(`SELECT (o.seen_at/3600)*3600 AS b, COUNT(*)
 		FROM occurrences o JOIN issues i ON i.id = o.issue_id
 		WHERE (? = '' OR i.project_key = ?)
 		  AND (? = '' OR i.type = ?)
@@ -76,7 +76,7 @@ func (s *Store) HourBuckets(project string, hours int, typ string) ([]int64, err
 // OpenIssueCount counts unresolved issues for a project.
 func (s *Store) OpenIssueCount(project string) (int64, error) {
 	var n int64
-	err := s.db.QueryRow(`SELECT COUNT(*) FROM issues
+	err := s.rdb.QueryRow(`SELECT COUNT(*) FROM issues
 		WHERE resolved = 0 AND (? = '' OR project_key = ?)`, project, project).Scan(&n)
 	return n, err
 }
@@ -84,13 +84,13 @@ func (s *Store) OpenIssueCount(project string) (int64, error) {
 // IssueTotal counts all issues for a project.
 func (s *Store) IssueTotal(project string) (int64, error) {
 	var n int64
-	err := s.db.QueryRow(`SELECT COUNT(*) FROM issues WHERE (? = '' OR project_key = ?)`, project, project).Scan(&n)
+	err := s.rdb.QueryRow(`SELECT COUNT(*) FROM issues WHERE (? = '' OR project_key = ?)`, project, project).Scan(&n)
 	return n, err
 }
 
 // LogLevels aggregates issue counts per level for the log stream filter.
 func (s *Store) LogLevels(project string) ([]LevelCount, error) {
-	rows, err := s.db.Query(`SELECT COALESCE(level, 'info'), COUNT(*) FROM issues
+	rows, err := s.rdb.Query(`SELECT COALESCE(level, 'info'), COUNT(*) FROM issues
 		WHERE type = 'log' AND (? = '' OR project_key = ?)
 		GROUP BY level ORDER BY COUNT(*) DESC`, project, project)
 	if err != nil {
@@ -116,7 +116,7 @@ func (s *Store) RequestStats(project string, hours int) (count int64, p50, p95 f
 		hours = 24
 	}
 	cutoff := time.Now().Add(-time.Duration(hours) * time.Hour).Unix()
-	rows, err2 := s.db.Query(`SELECT name, duration_ms FROM profiles
+	rows, err2 := s.rdb.Query(`SELECT name, duration_ms FROM profiles
 		WHERE type = 'request' AND (? = '' OR project_key = ?) AND created_at >= ?
 		ORDER BY created_at DESC LIMIT ?`, project, project, cutoff, maxStatsRows)
 	if err2 != nil {
@@ -126,9 +126,9 @@ func (s *Store) RequestStats(project string, hours int) (count int64, p50, p95 f
 
 	var all []float64
 	type acc struct {
-		n    int64
-		sum  float64
-		max  float64
+		n   int64
+		sum float64
+		max float64
 	}
 	byName := map[string]*acc{}
 	for rows.Next() {
@@ -177,7 +177,7 @@ func (s *Store) IssueSparklines(project string, hours int) (map[int64][]int64, e
 	}
 	now := time.Now().Unix()
 	cutoff := now - int64(hours)*3600
-	rows, err := s.db.Query(`SELECT o.issue_id, (o.seen_at/3600)*3600 AS b, COUNT(*)
+	rows, err := s.rdb.Query(`SELECT o.issue_id, (o.seen_at/3600)*3600 AS b, COUNT(*)
 		FROM occurrences o JOIN issues i ON i.id = o.issue_id
 		WHERE (? = '' OR i.project_key = ?) AND o.seen_at >= ?
 		GROUP BY o.issue_id, b`, project, project, cutoff)

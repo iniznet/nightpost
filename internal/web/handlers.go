@@ -47,8 +47,9 @@ var funcMap = template.FuncMap{
 	"rel":   relTime,
 	"spark": sparkPoints,
 	"ms":    fmtMs,
+	"mb":    fmtMB,
 	"pct":   func(v, max float64) string { return strconv.FormatFloat(pctOf(v, max), 'f', 1, 64) },
-	"pcti":  func(v, max int64) string {
+	"pcti": func(v, max int64) string {
 		if max <= 0 {
 			return "0.0"
 		}
@@ -68,6 +69,13 @@ func fmtMs(v float64) string {
 		return fmt.Sprintf("%.2f s", v/1000)
 	}
 	return fmt.Sprintf("%.1f ms", v)
+}
+
+func fmtMB(b int64) string {
+	if b < 0 {
+		b = 0
+	}
+	return fmt.Sprintf("%.1f MB", float64(b)/(1<<20))
 }
 
 func relTime(t time.Time) string {
@@ -187,6 +195,9 @@ func Register(mux *http.ServeMux, st *store.Store) {
 			data["Recent"] = recent
 			data["Spark"] = spark
 			data["Envs"] = envs
+		}
+		if stats, serr := st.Stats(); serr == nil {
+			data["StoreStats"] = stats
 		}
 		if err := dashboardTmpl.ExecuteTemplate(w, "layout", data); err != nil {
 			log.Printf("render dashboard: %v", err)
