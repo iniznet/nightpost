@@ -1,0 +1,7 @@
+* text=auto
+go.mod text
+go.sum text
+*.go text
+*.html text
+*.md text
+*.json text
