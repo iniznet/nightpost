@@ -1,0 +1,37 @@
+# fenrirealm-monitor — single-instance ingest (sqlite; never scale replicas).
+#
+# Backend producers reach this service BY HOSTNAME: the backend compose
+# senders default to monitor:9913 / monitor:8000. Two deployment shapes:
+#
+# 1) Same stack as the backend: uncomment the external network block and
+#    drop the ports: mapping (ingest stays private to the Docker network;
+#    reach the UI through the proxy).
+# 2) Own stack (this file as-is): the published 8000 port serves UI + ingest.
+
+services:
+  monitor:
+    build: .
+    image: iniznet/fenrirealm-monitor:latest
+    container_name: fenrirealm-monitor
+    restart: unless-stopped
+    command: ["/monitor", "-db", "/data/monitor.db", "-http", ":8000", "-socket", ":9913"]
+    volumes:
+      - monitor-data:/data
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8000/up"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    # --- backend-stack integration (shape 1) ---
+    # networks: [backend-net]
+
+# networks:
+#   backend-net:
+#     external: true
+#     name: <the backend compose project network>
+
+volumes:
+  monitor-data:
