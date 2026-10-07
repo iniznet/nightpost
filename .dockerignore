@@ -1,13 +1,3 @@
-<<<<<<< HEAD
-# never bake smoke-test artifacts or local build output into the image
-.git/
-*.db
-*.db-*
-*.log
-monitor.exe
-xhprof_payload.json
-docker-compose.yml
-=======
 .git
 .gitattributes
 monitor.db
@@ -16,4 +6,3 @@ smoke*.db*
 *.log
 monitor.exe
 *.md
->>>>>>> d6fc871 (feat(deploy): Dockerfile + compose service — loopback UI, dokploy-network senders, persistent volume (#145))
