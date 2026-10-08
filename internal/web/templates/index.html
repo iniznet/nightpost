@@ -27,13 +27,18 @@
   </select>
   <button>Apply</button>
 </form>
+<div class="filterbar">
+  <span class="label">sort</span>
+  <a href="?project={{.Project}}&type={{.Filter.Type}}&level={{.Filter.Level}}&env={{.Filter.Env}}&status={{.Filter.Status}}&q={{urlquery .Filter.Q}}&sort=pain" class="pill{{if eq .Filter.Sort "pain"}} on{{end}}">pain (count)</a>
+  <a href="?project={{.Project}}&type={{.Filter.Type}}&level={{.Filter.Level}}&env={{.Filter.Env}}&status={{.Filter.Status}}&q={{urlquery .Filter.Q}}&sort=recent" class="pill{{if eq .Filter.Sort "recent"}} on{{end}}">recent</a>
+</div>
 {{if .Issues}}
 <table>
 <thead><tr><th>Title</th><th>Type</th><th>Class</th><th>Level</th><th>Env</th><th>Count</th><th>Trend</th><th>Last seen</th></tr></thead>
 <tbody>
 {{range .Issues}}
-<tr class="{{if .Resolved}}resolved{{end}}">
-  <td><a href="/issues/{{.ID}}">{{.Title}}</a></td>
+<tr class="{{if .Resolved}}resolved{{end}}{{if eq .ID 0}} group{{end}}">
+  <td>{{if eq .ID 0}}<a href="/issues?project={{$.Project}}&q={{urlquery "Not found:"}}&status={{$.Filter.Status}}&sort=pain">{{.Title}}</a>{{else}}<a href="/issues/{{.ID}}">{{.Title}}</a>{{end}}</td>
   <td><span class="badge">{{.Type}}</span></td>
   <td class="mono dim">{{if .ExceptionClass}}{{.ExceptionClass}}{{else}}—{{end}}</td>
   <td><span class="badge lvl-{{.Level}}">{{or .Level "error"}}</span></td>

@@ -245,3 +245,149 @@ func (s *Store) ProjectSummary(project string) (ProjectSummary, error) {
 	sum.LogLevels, err = s.LogLevels(project)
 	return sum, err
 }
+
+
+// DashboardRow is one project's composed dashboard figures for the
+// all-projects view.
+type DashboardRow struct {
+	Summary ProjectSummary
+	Trend   []int64
+}
+
+// DashboardSummaries composes every project's dashboard figures in a bounded
+// number of passes: ONE windowed occurrences scan GROUPed BY project/type/
+// hour-bucket plus two small passes over the issues table, then the cheap
+// index-driven per-project profile aggregate. The all-projects dashboard used
+// to run ~7 queries per project — re-walking the whole 24h occurrences range
+// once per figure — which rendered the page in tens of seconds under real
+// volume. Trend slices are aligned oldest-first with exactly `hours` entries.
+func (s *Store) DashboardSummaries(hours int) ([]DashboardRow, error) {
+	if hours <= 0 || hours > 168 {
+		hours = 24
+	}
+	now := time.Now().Unix()
+	cutoff := now - int64(hours)*3600
+	base := now/3600*3600 - int64(hours-1)*3600
+
+	type agg struct {
+		errors, logs, open int64
+		trend              []int64
+		levels             []LevelCount
+	}
+	aggs := map[string]*agg{}
+
+	rows, err := s.rdb.Query(`SELECT i.project_key, i.type, (o.seen_at/3600)*3600 AS b, COUNT(*)
+		FROM occurrences o JOIN issues i ON i.id = o.issue_id
+		WHERE o.seen_at >= ?
+		GROUP BY i.project_key, i.type, b`, cutoff)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var proj, typ string
+		var bucket, c int64
+		if err := rows.Scan(&proj, &typ, &bucket, &c); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		a := aggs[proj]
+		if a == nil {
+			a = &agg{}
+			aggs[proj] = a
+		}
+		switch typ {
+		case "error":
+			a.errors += c
+			if a.trend == nil {
+				a.trend = make([]int64, hours)
+			}
+			if bucket >= base && bucket < base+int64(hours)*3600 {
+				a.trend[(bucket-base)/3600] += c
+			}
+		case "log":
+			a.logs += c
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+
+	rows, err = s.rdb.Query(`SELECT project_key, COUNT(*) FROM issues
+		WHERE resolved = 0 GROUP BY project_key`)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var proj string
+		var n int64
+		if err := rows.Scan(&proj, &n); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		a := aggs[proj]
+		if a == nil {
+			a = &agg{}
+			aggs[proj] = a
+		}
+		a.open = n
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+
+	rows, err = s.rdb.Query(`SELECT project_key, COALESCE(level, 'info'), COUNT(*) FROM issues
+		WHERE type = 'log' GROUP BY project_key, level ORDER BY COUNT(*) DESC`)
+	if err != nil {
+		return nil, err
+	}
+	for rows.Next() {
+		var proj, level string
+		var n int64
+		if err := rows.Scan(&proj, &level, &n); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		a := aggs[proj]
+		if a == nil {
+			a = &agg{}
+			aggs[proj] = a
+		}
+		a.levels = append(a.levels, LevelCount{Level: level, Count: n})
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+
+	projects, err := s.Projects()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]DashboardRow, 0, len(projects))
+	for _, p := range projects {
+		sum := ProjectSummary{Project: p}
+		if a := aggs[p]; a != nil {
+			sum.OpenIssues, sum.Errors24, sum.Logs24 = a.open, a.errors, a.logs
+			sum.LogLevels = a.levels
+		}
+		n, p50, p95, routes, err := s.RequestStats(p, hours)
+		if err != nil {
+			return nil, err
+		}
+		sum.Requests24, sum.P50Ms, sum.P95Ms, sum.TopRoutes = n, p50, p95, routes
+		row := DashboardRow{Summary: sum}
+		if a := aggs[p]; a != nil && len(a.trend) == hours {
+			row.Trend = a.trend
+		} else {
+			row.Trend = make([]int64, hours)
+		}
+		out = append(out, row)
+	}
+	return out, nil
+}
+
