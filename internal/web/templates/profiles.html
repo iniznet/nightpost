@@ -49,7 +49,7 @@
 <tbody>
 {{range .Profiles}}
 <tr>
-  <td><a href="/profiles/{{.ID}}">{{.Name}}</a></td>
+  <td><a href="/profiles/{{.ID}}">{{.Name}}</a>{{if .TraceID}} <a class="faint" href="/traces/{{.TraceID}}" title="cross-service waterfall">trace</a>{{end}}</td>
   <td><span class="badge">{{.Type}}</span></td>
   <td class="dim">{{.ProjectKey}}</td>
   <td class="num"><span class="inline-bar"><span class="fill" style="width:{{pct .DurationMs $.MaxDur}}%"></span></span><span class="mono">{{ms .DurationMs}}</span></td>

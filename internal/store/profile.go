@@ -24,6 +24,11 @@ const (
 type Span struct {
 	Name       string         `json:"name"`
 	DurationMs float64        `json:"duration_ms"`
+	// StartMs is the span's offset from ITS OWN profile's start (elapsed,
+	// never absolute wall-clock) — cross-service waterfalls join legs through
+	// the parent's measured window, so clock sync between containers is
+	// never required. Zero means "report order", the legacy layout.
+	StartMs    float64        `json:"start_ms,omitempty"`
 	Tags       map[string]any `json:"tags,omitempty"`
 }
 
@@ -42,6 +47,7 @@ type Profile struct {
 	Name        string
 	DurationMs  float64
 	Environment string
+	TraceID     string
 	Spans       []Span
 	Hotspots    []Hotspot
 	CreatedAt   time.Time
@@ -85,6 +91,7 @@ type ProfileInput struct {
 	Name        string
 	DurationMs  float64
 	Environment string
+	TraceID     string
 	Spans       []Span
 	Hotspots    []Hotspot
 }
@@ -99,9 +106,9 @@ func (s *Store) RecordProfile(in ProfileInput) (int64, error) {
 	if len(in.Hotspots) > maxProfileHotspots {
 		in.Hotspots = in.Hotspots[:maxProfileHotspots]
 	}
-	res, err := s.wdb.Exec(`INSERT INTO profiles (project_key, type, name, duration_ms, environment, spans, hotspots, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		in.ProjectKey, in.Type, truncate(in.Name, 240), in.DurationMs, in.Environment,
+	res, err := s.wdb.Exec(`INSERT INTO profiles (project_key, type, name, duration_ms, environment, trace_id, spans, hotspots, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		in.ProjectKey, in.Type, truncate(in.Name, 240), in.DurationMs, in.Environment, truncate(in.TraceID, 64),
 		marshalJSON(in.Spans), marshalJSON(in.Hotspots), time.Now().Unix())
 	if err != nil {
 		return 0, err
@@ -114,7 +121,7 @@ func (s *Store) ProfilesByType(projectKey, typ string, limit int) ([]Profile, er
 	if limit <= 0 || limit > 200 {
 		limit = defaultProfileLimit
 	}
-	rows, err := s.rdb.Query(`SELECT id, project_key, type, name, duration_ms, environment, spans, hotspots, created_at
+	rows, err := s.rdb.Query(`SELECT id, project_key, type, name, duration_ms, environment, trace_id, spans, hotspots, created_at
 		FROM profiles WHERE type = ? AND (? = '' OR project_key = ?)
 		ORDER BY created_at DESC, id DESC LIMIT ?`, typ, projectKey, projectKey, limit)
 	if err != nil {
@@ -136,7 +143,7 @@ func (s *Store) Profiles(projectKey string, limit int) ([]Profile, error) {
 	if limit <= 0 || limit > 200 {
 		limit = defaultProfileLimit
 	}
-	rows, err := s.rdb.Query(`SELECT id, project_key, type, name, duration_ms, environment, spans, hotspots, created_at
+	rows, err := s.rdb.Query(`SELECT id, project_key, type, name, duration_ms, environment, trace_id, spans, hotspots, created_at
 		FROM profiles WHERE (? = '' OR project_key = ?)
 		ORDER BY created_at DESC, id DESC LIMIT ?`, projectKey, projectKey, limit)
 	if err != nil {
@@ -155,7 +162,7 @@ func (s *Store) Profiles(projectKey string, limit int) ([]Profile, error) {
 }
 
 func (s *Store) Profile(id int64) (*Profile, error) {
-	row := s.rdb.QueryRow(`SELECT id, project_key, type, name, duration_ms, environment, spans, hotspots, created_at
+	row := s.rdb.QueryRow(`SELECT id, project_key, type, name, duration_ms, environment, trace_id, spans, hotspots, created_at
 		FROM profiles WHERE id = ?`, id)
 	p, err := scanProfile(row)
 	if err != nil {
@@ -312,7 +319,7 @@ func (s *Store) ProfilesFiltered(projectKey, typ, nameLike string, limit int) ([
 	if limit <= 0 || limit > 200 {
 		limit = defaultProfileLimit
 	}
-	rows, err := s.rdb.Query(`SELECT id, project_key, type, name, duration_ms, environment, spans, hotspots, created_at
+	rows, err := s.rdb.Query(`SELECT id, project_key, type, name, duration_ms, environment, trace_id, spans, hotspots, created_at
 		FROM profiles WHERE (? = '' OR type = ?) AND (? = '' OR project_key = ?)
 		AND (? = '' OR name LIKE '%' || ? || '%')
 		ORDER BY created_at DESC, id DESC LIMIT ?`, typ, typ, projectKey, projectKey, nameLike, nameLike, limit)
@@ -343,15 +350,43 @@ func (s *Store) PruneProfiles(keep int64) error {
 
 type profileScanner interface{ Scan(dest ...any) error }
 
+// ProfilesByTrace returns every profile carrying a trace id, oldest first —
+// the legs of one cross-service request in the order they happened.
+func (s *Store) ProfilesByTrace(traceID string, limit int) ([]Profile, error) {
+	if traceID == "" {
+		return nil, nil
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	rows, err := s.rdb.Query(`SELECT id, project_key, type, name, duration_ms, environment, trace_id, spans, hotspots, created_at
+		FROM profiles WHERE trace_id = ?
+		ORDER BY created_at ASC, id ASC LIMIT ?`, traceID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Profile
+	for rows.Next() {
+		p, err := scanProfile(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 func scanProfile(row profileScanner) (Profile, error) {
 	var p Profile
-	var typ, env, spans, hotspots sql.NullString
+	var typ, env, trace, spans, hotspots sql.NullString
 	var created int64
-	if err := row.Scan(&p.ID, &p.ProjectKey, &typ, &p.Name, &p.DurationMs, &env, &spans, &hotspots, &created); err != nil {
+	if err := row.Scan(&p.ID, &p.ProjectKey, &typ, &p.Name, &p.DurationMs, &env, &trace, &spans, &hotspots, &created); err != nil {
 		return p, err
 	}
 	p.Type = typ.String
 	p.Environment = env.String
+	p.TraceID = trace.String
 	p.CreatedAt = time.Unix(created, 0)
 	p.Spans = unmarshalSpans(spans)
 	p.Hotspots = unmarshalHotspots(hotspots)
