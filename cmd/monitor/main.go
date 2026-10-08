@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/iniznet/fenrirealm-monitor/internal/alerts"
 	"github.com/iniznet/fenrirealm-monitor/internal/ingest"
 	"github.com/iniznet/fenrirealm-monitor/internal/store"
 	"github.com/iniznet/fenrirealm-monitor/internal/web"
@@ -30,6 +31,7 @@ func main() {
 	ingestBurst := flag.Float64("ingest-burst", 100, "ingest burst ceiling per project")
 	sessionSecret := flag.String("session-secret", "", "HMAC key for dashboard session cookies (empty = random per boot; sessions die on restart)")
 	resetAdmin := flag.String("reset-admin", "", "one-shot: reset (or create) this admin email's password, print a fresh one, and exit")
+	alertsConfig := flag.String("alerts-config", "", "path to alerts JSON (channels + rules); empty = alerting disabled")
 	flag.Parse()
 
 	st, err := store.Open(*dbPath)
@@ -62,6 +64,17 @@ func main() {
 			log.Fatalf("session secret entropy: %v", err)
 		}
 		log.Printf("WARNING: -session-secret unset; generated a per-boot key — dashboard sessions will not survive restarts")
+	}
+	if *alertsConfig != "" {
+		acfg, aerr := alerts.LoadConfig(*alertsConfig)
+		if aerr != nil {
+			log.Fatalf("alerts config: %v", aerr)
+		}
+		disp := alerts.NewDispatcher(st, acfg, *alertsConfig)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		go disp.Run(ctx)
+		log.Printf("alerts: dispatcher armed (%d channels, %d rules)", len(acfg.Channels), len(acfg.Rules))
 	}
 	auth := web.NewAuth(st, secret)
 	go func() {

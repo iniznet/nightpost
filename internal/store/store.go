@@ -179,6 +179,15 @@ func migrate(db *sql.DB) error {
 	pw_hash TEXT NOT NULL,
 	created_at INTEGER NOT NULL DEFAULT 0,
 	sessions_valid_after INTEGER NOT NULL DEFAULT 0)`},
+		{"issues.resolved_at", `ALTER TABLE issues ADD COLUMN resolved_at INTEGER NOT NULL DEFAULT 0`},
+		{"alerts_log", `CREATE TABLE IF NOT EXISTS alerts_log (
+	id INTEGER PRIMARY KEY,
+	channel TEXT NOT NULL,
+	rule TEXT NOT NULL,
+	target_key TEXT NOT NULL,
+	sent_at INTEGER NOT NULL)`},
+		{"idx_alerts_target", `CREATE INDEX IF NOT EXISTS idx_alerts_target ON alerts_log(rule, target_key, sent_at DESC)`},
+		{"idx_alerts_channel", `CREATE INDEX IF NOT EXISTS idx_alerts_channel ON alerts_log(channel, sent_at DESC)`},
 	} {
 		if _, err := db.Exec(m.stmt); err != nil {
 			// Idempotent: only "already applied" failures may pass through.
@@ -426,8 +435,20 @@ func (s *Store) Occurrences(issueID int64, limit int) ([]map[string]any, error) 
 	return out, rows.Err()
 }
 
+// SetResolvedAt resolves an issue with an explicit resolution stamp —
+// the regression rule compares last_seen_at > resolved_at, and tooling
+// (plus tests) needs deterministic control over that boundary.
+func (s *Store) SetResolvedAt(id int64, at int64) error {
+	_, err := s.wdb.Exec(`UPDATE issues SET resolved = 1, resolved_at = ? WHERE id = ?`, at, id)
+	return err
+}
+
 func (s *Store) SetResolved(id int64, resolved bool) error {
-	_, err := s.wdb.Exec(`UPDATE issues SET resolved = ? WHERE id = ?`, resolved, id)
+	stamp := 0
+	if resolved {
+		stamp = 1
+	}
+	_, err := s.wdb.Exec(`UPDATE issues SET resolved = ?, resolved_at = CASE WHEN ? = 1 THEN CAST(strftime('%s','now') AS INTEGER) ELSE 0 END WHERE id = ?`, resolved, stamp, id)
 	return err
 }
 
