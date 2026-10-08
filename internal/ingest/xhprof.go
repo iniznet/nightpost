@@ -61,6 +61,7 @@ func XHProfHandler(st *store.Store) http.HandlerFunc {
 		id, err := st.RecordProfile(store.ProfileInput{
 			ProjectKey: projectKey, Type: store.ProfileTypeCallgraph, Name: name,
 			DurationMs: totalMs, Environment: env, Hotspots: hotspots,
+			TraceID: payload.Tags["trace_id"],
 		})
 		if err != nil {
 			log.Printf("record xhprof profile: %v", err)

@@ -16,4 +16,14 @@
 </div>
 {{end}}
 {{else}}<p class="empty">No spans recorded for this trace.</p>{{end}}
+{{range .Trace.HotGroups}}
+<h2 class="faint" style="margin-top:1.5rem"><a href="/profiles/{{.ProfileID}}">{{.Project}}: {{.Name}}</a> — hotspots (self time)</h2>
+{{range .Rows}}
+<div class="bar-row">
+  <div class="mono" title="{{.Function}}">{{.Function}}</div>
+  <div class="track"><span class="fill wf-fill" style="width:{{.Width}}%"></span></div>
+  <div><span class="mono">{{ms .SelfMs}}</span>{{if .Calls}} · <span class="mono">{{.Calls}}&times;</span>{{end}}</div>
+</div>
+{{end}}
+{{end}}
 {{end}}
