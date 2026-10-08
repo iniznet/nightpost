@@ -627,11 +627,30 @@ type TraceRow struct {
 	StartMs    float64
 }
 
+// HotRow is one self-time hotspot rendered under a trace leg.
+type HotRow struct {
+	Function string
+	Left     string
+	Width    string
+	SelfMs   float64
+	Calls    int64
+}
+
+// LegHotspots is the code-execution detail of one trace leg: its top
+// self-time functions, bar-scaled against the leg's worst offender.
+type LegHotspots struct {
+	ProfileID int64
+	Project   string
+	Name      string
+	Rows      []HotRow
+}
+
 // TraceView is the assembled /traces/{id} page model.
 type TraceView struct {
-	Rows     []TraceRow
-	TotalMs  float64
-	Legs     []store.Profile
+	Rows      []TraceRow
+	HotGroups []LegHotspots
+	TotalMs   float64
+	Legs      []store.Profile
 	FirstSeen time.Time
 	LastSeen  time.Time
 }
@@ -710,6 +729,36 @@ func buildTraceView(legs []store.Profile) *TraceView {
 			w = v.Rows[i].DurationMs / v.TotalMs * 100
 		}
 		v.Rows[i].Width = f1(w)
+	}
+	// Code-execution detail: each leg's top self-time functions, bars scaled
+	// against that leg's worst offender. Hotspots arrive sorted descending
+	// (foldTrace / the front reporter), so the first ten are the answer to
+	// "where did the time go" without a second sort.
+	for _, leg := range legs {
+		if len(leg.Hotspots) == 0 {
+			continue
+		}
+		var maxSelf float64
+		for _, h := range leg.Hotspots {
+			if h.SelfMs > maxSelf {
+				maxSelf = h.SelfMs
+			}
+		}
+		top := leg.Hotspots
+		if len(top) > 10 {
+			top = top[:10]
+		}
+		group := LegHotspots{ProfileID: leg.ID, Project: leg.ProjectKey, Name: leg.Name}
+		for _, h := range top {
+			var w float64
+			if maxSelf > 0 {
+				w = h.SelfMs / maxSelf * 100
+			}
+			group.Rows = append(group.Rows, HotRow{
+				Function: h.Function, Left: "0", Width: f1(w), SelfMs: h.SelfMs, Calls: h.Calls,
+			})
+		}
+		v.HotGroups = append(v.HotGroups, group)
 	}
 	return v
 }
