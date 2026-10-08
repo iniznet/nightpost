@@ -90,6 +90,16 @@ pre{font:12.5px/1.55 var(--mono);background:var(--panel2);border:1px solid var(-
 .inline-bar{position:relative;width:90px;height:6px;background:var(--panel2);border-radius:3px;display:inline-block;vertical-align:middle;margin-right:.5rem;overflow:hidden}
 .inline-bar .fill{position:absolute;top:0;bottom:0;left:0}
 
+details.tn, .tn-leaf{margin-left:.9rem}
+details.tn>summary, .tn-leaf{display:flex;gap:.6rem;align-items:center;padding:.14rem 0;list-style:none;cursor:pointer}
+details.tn>summary::-webkit-details-marker{display:none}
+details.tn>summary::before, .tn-leaf::before{content:"·";color:var(--faint,#667);flex:0 0 .6rem}
+details.tn[open]>summary::before{content:"▾";color:var(--faint,#667)}
+.tn-name{flex:0 1 46%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tn-bar{flex:1;min-width:70px;height:6px;background:var(--panel2);border-radius:3px;position:relative;overflow:hidden}
+.tn-bar .fill{position:absolute;left:0;top:0;bottom:0}
+.tn-num{flex:0 0 auto;min-width:70px;text-align:right}
+
 .meta{display:flex;gap:.4rem;flex-wrap:wrap;align-items:center}
 .actions{margin:1rem 0}
 details.occ{background:var(--panel);border:1px solid var(--border);border-radius:10px;margin:.6rem 0}

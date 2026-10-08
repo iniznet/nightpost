@@ -10,9 +10,10 @@ import (
 )
 
 // foldTrace math, asserted exactly (microseconds in -> ms out):
-//   main() inclusive 1,000,000us; children Foo::bar 600,000us and
-//   str_repeat 300,000us; Foo::bar itself calls Baz::qux 200,000us.
-//   self: Foo::bar 400ms, str_repeat 300ms, Baz::qux 200ms, main 100ms.
+//
+//	main() inclusive 1,000,000us; children Foo::bar 600,000us and
+//	str_repeat 300,000us; Foo::bar itself calls Baz::qux 200,000us.
+//	self: Foo::bar 400ms, str_repeat 300ms, Baz::qux 200ms, main 100ms.
 func TestXHProfHandlerFoldsSelfTime(t *testing.T) {
 	st := newBenchStore(t)
 
@@ -108,5 +109,33 @@ func TestXHProfHandlerStoresTraceID(t *testing.T) {
 	}
 	if len(legs[0].Hotspots) == 0 {
 		t.Errorf("callgraph lost its hotspots")
+	}
+}
+
+// The xhprof ingest must also store the rebuilt call tree (#181) so the
+// trace/profile pages can render the stack, not just the flat list.
+func TestXHProfHandlerStoresCallTree(t *testing.T) {
+	st := newBenchStore(t)
+	body := `{"profile":{
+		"main()":{"ct":1,"wt":1000000},
+		"main()==>App\\Slow::handle":{"ct":1,"wt":600000},
+		"App\\Slow::handle==>App\\Deep::query":{"ct":1,"wt":400000}
+	},"tags":{"env":"production","host":"n1"},"app_name":"fenrirealm","hostname":"n1","date":1728300000}`
+	req := httptest.NewRequest(http.MethodPost, "/api/profiler/store", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	XHProfHandler(st)(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	profiles, err := st.Profiles("backend", 10)
+	if err != nil || len(profiles) != 1 {
+		t.Fatalf("profiles: %d %v", len(profiles), err)
+	}
+	tree := profiles[0].Tree
+	if len(tree) != 1 || tree[0].N != "main()" || tree[0].I != 1000 {
+		t.Fatalf("tree root = %+v", tree)
+	}
+	if len(tree[0].K) != 1 || tree[0].K[0].N != "App\\Slow::handle" {
+		t.Errorf("tree children = %+v", tree[0].K)
 	}
 }

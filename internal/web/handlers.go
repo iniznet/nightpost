@@ -526,6 +526,7 @@ func Register(mux *http.ServeMux, st *store.Store) {
 		data := baseData(st, profile.ProjectKey, PageProfiles)
 		data["Profile"] = profile
 		data["SpanRows"] = buildSpanRows(profile)
+		data["Tree"] = buildTreeViews(profile.Tree, profile.DurationMs, 0)
 		data["MaxSelf"] = maxSelf
 		if err := profileTmpl.ExecuteTemplate(w, "layout", data); err != nil {
 			log.Printf("render profile: %v", err)
@@ -636,13 +637,15 @@ type HotRow struct {
 	Calls    int64
 }
 
-// LegHotspots is the code-execution detail of one trace leg: its top
-// self-time functions, bar-scaled against the leg's worst offender.
+// LegHotspots is the code-execution detail of one trace leg: its pruned
+// call tree when the producer sent one, else its top self-time functions
+// bar-scaled against the leg's worst offender.
 type LegHotspots struct {
 	ProfileID int64
 	Project   string
 	Name      string
 	Rows      []HotRow
+	Trees     []TreeView
 }
 
 // TraceView is the assembled /traces/{id} page model.
@@ -735,7 +738,7 @@ func buildTraceView(legs []store.Profile) *TraceView {
 	// (foldTrace / the front reporter), so the first ten are the answer to
 	// "where did the time go" without a second sort.
 	for _, leg := range legs {
-		if len(leg.Hotspots) == 0 {
+		if len(leg.Hotspots) == 0 && len(leg.Tree) == 0 {
 			continue
 		}
 		var maxSelf float64
@@ -749,6 +752,15 @@ func buildTraceView(legs []store.Profile) *TraceView {
 			top = top[:10]
 		}
 		group := LegHotspots{ProfileID: leg.ID, Project: leg.ProjectKey, Name: leg.Name}
+		if len(leg.Tree) > 0 {
+			total := leg.DurationMs
+			for _, n := range leg.Tree {
+				if n.I > total {
+					total = n.I
+				}
+			}
+			group.Trees = buildTreeViews(leg.Tree, total, 0)
+		}
 		for _, h := range top {
 			var w float64
 			if maxSelf > 0 {
@@ -764,6 +776,37 @@ func buildTraceView(legs []store.Profile) *TraceView {
 }
 
 func f1(v float64) string { return strconv.FormatFloat(v, 'f', 1, 64) }
+
+// TreeView is a render-ready call-tree node: inclusive time as a bar width
+// against the profile total, plus the depth used to auto-open top levels.
+type TreeView struct {
+	Name     string
+	Width    string
+	SelfMs   float64
+	InclMs   float64
+	Calls    int64
+	Depth    int
+	Children []TreeView
+}
+
+// buildTreeViews converts stored TreeNode rows into render-ready views.
+// The ingest caps tree depth, so this recursion is bounded.
+func buildTreeViews(nodes []store.TreeNode, totalMs float64, depth int) []TreeView {
+	out := make([]TreeView, 0, len(nodes))
+	for _, n := range nodes {
+		w := 0.0
+		if totalMs > 0 {
+			w = n.I / totalMs * 100
+		}
+		if w > 100 {
+			w = 100
+		}
+		tv := TreeView{Name: n.N, Width: f1(w), SelfMs: n.S, InclMs: n.I, Calls: n.C, Depth: depth}
+		tv.Children = buildTreeViews(n.K, totalMs, depth+1)
+		out = append(out, tv)
+	}
+	return out
+}
 
 // resolveHandler flips the resolved bit and redirects back to the issues
 // list preserving the project filter.

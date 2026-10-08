@@ -17,7 +17,10 @@
 {{end}}
 {{else}}<p class="empty">No spans recorded for this trace.</p>{{end}}
 {{range .Trace.HotGroups}}
-<h2 class="faint" style="margin-top:1.5rem"><a href="/profiles/{{.ProfileID}}">{{.Project}}: {{.Name}}</a> — hotspots (self time)</h2>
+<h2 class="faint" style="margin-top:1.5rem"><a href="/profiles/{{.ProfileID}}">{{.Project}}: {{.Name}}</a> — {{if .Trees}}call tree{{else}}hotspots (self time){{end}}</h2>
+{{if .Trees}}
+{{range .Trees}}{{template "treeNode" .}}{{end}}
+{{end}}
 {{range .Rows}}
 <div class="bar-row">
   <div class="mono" title="{{.Function}}">{{.Function}}</div>
@@ -25,5 +28,16 @@
   <div><span class="mono">{{ms .SelfMs}}</span>{{if .Calls}} · <span class="mono">{{.Calls}}&times;</span>{{end}}</div>
 </div>
 {{end}}
+{{end}}
+{{end}}
+
+{{define "treeNode"}}
+{{if .Children}}
+<details class="tn"{{if lt .Depth 2}} open{{end}}>
+  <summary><span class="tn-name mono" title="{{.Name}}">{{.Name}}</span><span class="tn-bar"><span class="fill wf-fill" style="width:{{.Width}}%"></span></span><span class="mono tn-num">{{ms .InclMs}}{{if .Calls}} · {{.Calls}}×{{end}}</span></summary>
+  {{range .Children}}{{template "treeNode" .}}{{end}}
+</details>
+{{else}}
+<div class="tn tn-leaf"><span class="tn-name mono" title="{{.Name}}">{{.Name}}</span><span class="tn-bar"><span class="fill wf-fill" style="width:{{.Width}}%"></span></span><span class="mono tn-num">{{ms .InclMs}}{{if .Calls}} · {{.Calls}}×{{end}}</span></div>
 {{end}}
 {{end}}

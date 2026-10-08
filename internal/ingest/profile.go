@@ -32,13 +32,14 @@ func ProfileHandler(st *store.Store) http.HandlerFunc {
 		}
 
 		var payload struct {
-			Name        string          `json:"name"`
-			DurationMs  float64         `json:"duration_ms"`
-			Environment string          `json:"environment"`
-			Type        string          `json:"type"`
-			TraceID     string          `json:"trace_id"`
-			Spans       []store.Span    `json:"spans"`
-			Hotspots    []store.Hotspot `json:"hotspots"`
+			Name        string           `json:"name"`
+			DurationMs  float64          `json:"duration_ms"`
+			Environment string           `json:"environment"`
+			Type        string           `json:"type"`
+			TraceID     string           `json:"trace_id"`
+			Spans       []store.Span     `json:"spans"`
+			Hotspots    []store.Hotspot  `json:"hotspots"`
+			Tree        []store.TreeNode `json:"tree"`
 		}
 		if err := json.Unmarshal(body, &payload); err != nil || payload.Name == "" || payload.DurationMs <= 0 {
 			http.Error(w, "invalid profile", http.StatusBadRequest)
@@ -60,6 +61,7 @@ func ProfileHandler(st *store.Store) http.HandlerFunc {
 			DurationMs: payload.DurationMs, Environment: payload.Environment,
 			TraceID: payload.TraceID,
 			Spans:   spans, Hotspots: hotspots,
+			Tree: SanitizeTree(payload.Tree, payload.DurationMs),
 		})
 		if err != nil {
 			log.Printf("record profile: %v", err)
