@@ -20,14 +20,6 @@ var templateFS embed.FS
 
 type Page string
 
-const (
-	PageDashboard Page = "dashboard"
-	PageIssues    Page = "issues"
-	PageLogs      Page = "logs"
-	PageProfiles  Page = "profiles"
-	PageSlowest   Page = "slowest"
-)
-
 type issueFilter struct {
 	Type, Level, Env, Channel, Status, Q string
 	Sort                                 string
@@ -169,6 +161,15 @@ type SpanRow struct {
 	DurationMs float64
 }
 
+const (
+	PageDashboard Page = "dashboard"
+	PageIssues    Page = "issues"
+	PageLogs      Page = "logs"
+	PageProfiles  Page = "profiles"
+	PageSlowest   Page = "slowest"
+	PageTrace     Page = "trace"
+)
+
 var funcMap = template.FuncMap{
 	"rel":   relTime,
 	"spark": sparkPoints,
@@ -270,6 +271,7 @@ func Register(mux *http.ServeMux, st *store.Store) {
 	profilesTmpl := mustLayout("profiles.html")
 	profileTmpl := mustLayout("profile.html")
 	slowestTmpl := mustLayout("slowest.html")
+	traceTmpl := mustLayout("trace.html")
 
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		project := r.URL.Query().Get("project")
@@ -530,6 +532,25 @@ func Register(mux *http.ServeMux, st *store.Store) {
 		}
 	})
 
+	mux.HandleFunc("GET /traces/{id}", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		legs, err := st.ProfilesByTrace(id, 20)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if len(legs) == 0 {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		data := baseData(st, "", PageTrace)
+		data["Trace"] = buildTraceView(legs)
+		data["TraceID"] = id
+		if err := traceTmpl.ExecuteTemplate(w, "layout", data); err != nil {
+			log.Printf("render trace: %v", err)
+		}
+	})
+
 	mux.HandleFunc("GET /slowest", func(w http.ResponseWriter, r *http.Request) {
 		project := r.URL.Query().Get("project")
 		rows, err := st.SlowestCode(project, 500)
@@ -552,30 +573,145 @@ func Register(mux *http.ServeMux, st *store.Store) {
 	})
 }
 
-// buildSpanRows lays out a request-profile span waterfall: spans are stored
-// in report order without start offsets, so each bar starts where the
-// previous one ends (clamped to the reported total duration).
+// buildSpanRows lays out a request-profile span waterfall. Spans that carry
+// start_ms offsets are placed at them (the offset form is authoritative and
+// may overlap or gap); legacy spans without offsets keep the report-order
+// layout where each bar starts where the previous one ends (clamped to the
+// reported total duration).
 func buildSpanRows(p *store.Profile) []SpanRow {
 	total := p.DurationMs
-	var cum float64
+	var cum, maxEnd float64
+	offsets := false
 	for _, s := range p.Spans {
 		cum += s.DurationMs
+		if s.StartMs > 0 {
+			offsets = true
+		}
+		if end := s.StartMs + s.DurationMs; end > maxEnd {
+			maxEnd = end
+		}
 	}
 	if cum > total {
 		total = cum
+	}
+	if maxEnd > total {
+		total = maxEnd
 	}
 	rows := make([]SpanRow, 0, len(p.Spans))
 	var start float64
 	for _, s := range p.Spans {
 		left, width := 0.0, 0.0
 		if total > 0 {
-			left = start / total * 100
+			if offsets {
+				left = s.StartMs / total * 100
+			} else {
+				left = start / total * 100
+			}
 			width = s.DurationMs / total * 100
 		}
 		rows = append(rows, SpanRow{Name: s.Name, Left: f1(left), Width: f1(width), DurationMs: s.DurationMs})
 		start += s.DurationMs
 	}
 	return rows
+}
+
+// TraceRow is one bar of the cross-service trace waterfall: a span from any
+// leg, positioned in trace-relative elapsed milliseconds.
+type TraceRow struct {
+	Project    string
+	ProfileID  int64
+	Span       string
+	Left       string
+	Width      string
+	DurationMs float64
+	StartMs    float64
+}
+
+// TraceView is the assembled /traces/{id} page model.
+type TraceView struct {
+	Rows     []TraceRow
+	TotalMs  float64
+	Legs     []store.Profile
+	FirstSeen time.Time
+	LastSeen  time.Time
+}
+
+// buildTraceView stitches the legs of one trace into a single waterfall.
+// Every leg's spans are elapsed offsets from that leg's own start, so legs
+// are joined through the PARENT's measured window: profile N's timeline is
+// anchored at the parent span tagged leg=backend (start + duration), or —
+// when the parent reports no such span — after the parent's last span ends.
+// No cross-container clock sync is ever involved.
+func buildTraceView(legs []store.Profile) *TraceView {
+	v := &TraceView{Legs: legs}
+	if len(legs) == 0 {
+		return v
+	}
+	v.FirstSeen, v.LastSeen = legs[0].CreatedAt, legs[len(legs)-1].CreatedAt
+	type placed struct {
+		abs, end float64
+	}
+	ends := make([]placed, len(legs))
+	for i, leg := range legs {
+		var anchor float64
+		if i > 0 {
+			// Anchor this leg inside the parent's measured window.
+			anchor = ends[i-1].end
+			for _, s := range legs[i-1].Spans {
+				if t, ok := s.Tags["leg"].(string); ok && t == "backend" {
+					// Anchor at the fetch span's START: the backend leg's
+					// bars draw inside the parent's fetch window, not after it.
+					anchor = ends[i-1].abs + s.StartMs
+					break
+				}
+			}
+		}
+		// Legacy legs (no offsets) lay spans out sequentially.
+		offsets := false
+		for _, s := range leg.Spans {
+			if s.StartMs > 0 {
+				offsets = true
+				break
+			}
+		}
+		var seq float64
+		for _, s := range leg.Spans {
+			start := seq
+			if offsets {
+				start = s.StartMs
+			}
+			abs := anchor + start
+			end := abs + s.DurationMs
+			v.Rows = append(v.Rows, TraceRow{
+				Project: leg.ProjectKey, ProfileID: leg.ID, Span: s.Name,
+				Left: f1(abs), DurationMs: s.DurationMs, StartMs: abs,
+			})
+			if end > v.TotalMs {
+				v.TotalMs = end
+			}
+			seq = start + s.DurationMs
+			if end > ends[i].end {
+				ends[i].end = end
+			}
+			ends[i].abs = anchor
+		}
+		if len(leg.Spans) == 0 {
+			ends[i].abs = anchor
+			ends[i].end = anchor + leg.DurationMs
+			if ends[i].end > v.TotalMs {
+				v.TotalMs = ends[i].end
+			}
+		}
+	}
+	// Percent bars against the trace total.
+	for i := range v.Rows {
+		var w float64
+		if v.TotalMs > 0 {
+			w = v.Rows[i].DurationMs / v.TotalMs * 100
+		}
+		v.Rows[i].Width = f1(w)
+	}
+	return v
 }
 
 func f1(v float64) string { return strconv.FormatFloat(v, 'f', 1, 64) }

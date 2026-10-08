@@ -36,6 +36,7 @@ func ProfileHandler(st *store.Store) http.HandlerFunc {
 			DurationMs  float64         `json:"duration_ms"`
 			Environment string          `json:"environment"`
 			Type        string          `json:"type"`
+			TraceID     string          `json:"trace_id"`
 			Spans       []store.Span    `json:"spans"`
 			Hotspots    []store.Hotspot `json:"hotspots"`
 		}
@@ -50,14 +51,15 @@ func ProfileHandler(st *store.Store) http.HandlerFunc {
 		spans := make([]store.Span, 0, len(payload.Spans))
 		for _, span := range payload.Spans {
 			tags, _ := store.Clean(span.Tags).(map[string]any)
-			spans = append(spans, store.Span{Name: span.Name, DurationMs: span.DurationMs, Tags: tags})
+			spans = append(spans, store.Span{Name: span.Name, DurationMs: span.DurationMs, StartMs: span.StartMs, Tags: tags})
 		}
 		hotspots := sanitizeHotspots(payload.Hotspots)
 
 		id, err := st.RecordProfile(store.ProfileInput{
 			ProjectKey: projectKey, Type: payload.Type, Name: payload.Name,
 			DurationMs: payload.DurationMs, Environment: payload.Environment,
-			Spans: spans, Hotspots: hotspots,
+			TraceID: payload.TraceID,
+			Spans:   spans, Hotspots: hotspots,
 		})
 		if err != nil {
 			log.Printf("record profile: %v", err)
