@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/iniznet/fenrirealm-monitor/internal/ingest"
 	"github.com/iniznet/fenrirealm-monitor/internal/store"
 )
 
@@ -168,6 +169,7 @@ const (
 	PageProfiles  Page = "profiles"
 	PageSlowest   Page = "slowest"
 	PageTrace     Page = "trace"
+	PageKeys      Page = "keys"
 )
 
 var funcMap = template.FuncMap{
@@ -263,7 +265,7 @@ func parseID(s string) int64 {
 	return id
 }
 
-func Register(mux *http.ServeMux, st *store.Store) {
+func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate) {
 	dashboardTmpl := mustLayout("dashboard.html")
 	issuesTmpl := mustLayout("index.html")
 	detailTmpl := mustLayout("detail.html")
@@ -272,6 +274,55 @@ func Register(mux *http.ServeMux, st *store.Store) {
 	profileTmpl := mustLayout("profile.html")
 	slowestTmpl := mustLayout("slowest.html")
 	traceTmpl := mustLayout("trace.html")
+	keysTmpl := mustLayout("keys.html")
+
+	mux.HandleFunc("GET /keys", func(w http.ResponseWriter, r *http.Request) {
+		data := baseData(st, r.URL.Query().Get("project"), PageKeys)
+		projects, err := st.ListProjects()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		data["ProjectRows"] = projects
+		if err := keysTmpl.ExecuteTemplate(w, "layout", data); err != nil {
+			log.Printf("render keys: %v", err)
+		}
+	})
+
+	mux.HandleFunc("POST /keys/rotate", func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "malformed form", http.StatusBadRequest)
+			return
+		}
+		project := strings.TrimSpace(r.FormValue("project"))
+		if project == "" {
+			http.Error(w, "project required", http.StatusBadRequest)
+			return
+		}
+		secret, err := st.RotateIngestKey(project)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if gate != nil {
+			gate.Invalidate(project)
+		}
+		log.Printf("ingest key rotated for project %q", project)
+		data := baseData(st, project, PageKeys)
+		projects, perr := st.ListProjects()
+		if perr != nil {
+			http.Error(w, perr.Error(), http.StatusInternalServerError)
+			return
+		}
+		data["ProjectRows"] = projects
+		data["NewKey"] = secret
+		data["NewKeyProject"] = project
+		w.Header().Set("Cache-Control", "no-store")
+		if err := keysTmpl.ExecuteTemplate(w, "layout", data); err != nil {
+			log.Printf("render keys: %v", err)
+		}
+	})
+
 
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		project := r.URL.Query().Get("project")

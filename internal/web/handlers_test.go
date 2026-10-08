@@ -20,7 +20,7 @@ func newTestServer(t *testing.T) (*httptest.Server, *store.Store) {
 	}
 	t.Cleanup(func() { st.Close() })
 	mux := http.NewServeMux()
-	Register(mux, st)
+	Register(mux, st, nil)
 	return httptest.NewServer(mux), st
 }
 

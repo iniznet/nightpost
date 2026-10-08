@@ -36,9 +36,13 @@ func main() {
 	defer st.Close()
 	st.MaxOccPerMin = *occurrenceCap
 	logDBGuard(*dbPath)
+	if n, uerr := st.UnsignedProjectCount(); uerr == nil && n > 0 {
+		log.Printf("WARNING: %d project(s) accept unsigned ingest (no key) — rotate keys at /keys; the unsigned path is deprecated (#157)", n)
+	}
 
 	mon := &ingest.Monolog{Store: st}
 	sh := ingest.NewShaper(*ingestRate, *ingestBurst)
+	gate := ingest.NewKeyGate(st, 5*time.Second)
 	go func() {
 		if err := mon.ListenAndServe(*sockAddr); err != nil {
 			log.Printf("monolog socket stopped: %v", err)
@@ -48,23 +52,23 @@ func main() {
 	go retentionLoop(st, *retentionDays, *pruneInterval)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /ingest/{project}/sentry", ingest.WithShaper(sh, ingest.SentryHandler(st)))
-	mux.HandleFunc("POST /ingest/{project}/profile", ingest.WithCORS(*corsOrigin, ingest.WithShaper(sh, ingest.ProfileHandler(st))))
-	mux.HandleFunc("POST /ingest/{project}/error", ingest.WithCORS(*corsOrigin, ingest.WithShaper(sh, ingest.ErrorHandler(st))))
-	mux.HandleFunc("POST /ingest/{project}/xhprof", ingest.WithShaper(sh, ingest.XHProfHandler(st)))
+	mux.HandleFunc("POST /ingest/{project}/sentry", ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.PathProject, ingest.SentryHandler(st))))
+	mux.HandleFunc("POST /ingest/{project}/profile", ingest.WithCORS(*corsOrigin, ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.PathProject, ingest.ProfileHandler(st)))))
+	mux.HandleFunc("POST /ingest/{project}/error", ingest.WithCORS(*corsOrigin, ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.PathProject, ingest.ErrorHandler(st)))))
+	mux.HandleFunc("POST /ingest/{project}/xhprof", ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.XHProfProject, ingest.XHProfHandler(st))))
 	// Sentry SDK compatibility: sentry-laravel POSTs envelopes to /api/{id}/store.
-	mux.HandleFunc("POST /api/{project}/store", ingest.WithShaper(sh, ingest.SentryHandler(st)))
-	mux.HandleFunc("POST /api/{project}/store/", ingest.WithShaper(sh, ingest.SentryHandler(st)))
-	mux.HandleFunc("POST /api/{project}/envelope", ingest.WithShaper(sh, ingest.SentryHandler(st)))
+	mux.HandleFunc("POST /api/{project}/store", ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.PathProject, ingest.SentryHandler(st))))
+	mux.HandleFunc("POST /api/{project}/store/", ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.PathProject, ingest.SentryHandler(st))))
+	mux.HandleFunc("POST /api/{project}/envelope", ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.PathProject, ingest.SentryHandler(st))))
 	// spiral-packages/profiler compatibility: PROFILER_ENDPOINT posts here
 	// (project key = HTTP Basic username, e.g. http://backend@monitor:8000/...).
-	mux.HandleFunc("POST /api/profiler/store", ingest.WithShaper(sh, ingest.XHProfHandler(st)))
-	mux.HandleFunc("POST /api/{project}/profiler/store", ingest.WithShaper(sh, ingest.XHProfHandler(st)))
+	mux.HandleFunc("POST /api/profiler/store", ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.XHProfProject, ingest.XHProfHandler(st))))
+	mux.HandleFunc("POST /api/{project}/profiler/store", ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.XHProfProject, ingest.XHProfHandler(st))))
 	// Browser preflight for the first-party reporter endpoints.
 	mux.HandleFunc("OPTIONS /ingest/{project}/error", ingest.PreflightHandler(*corsOrigin))
 	mux.HandleFunc("OPTIONS /ingest/{project}/profile", ingest.PreflightHandler(*corsOrigin))
 	mux.HandleFunc("GET /up", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	web.Register(mux, st)
+	web.Register(mux, st, gate)
 
 	srv := &http.Server{Addr: *httpAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 

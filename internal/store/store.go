@@ -147,7 +147,14 @@ CREATE INDEX IF NOT EXISTS idx_occurrences_issue ON occurrences(issue_id, seen_a
 		rdb.Close()
 		return nil, err
 	}
-	return &Store{wdb: wdb, rdb: rdb, limWindows: map[string]*limWindow{}, MaxOccPerMin: 30}, nil
+	s := &Store{wdb: wdb, rdb: rdb, limWindows: map[string]*limWindow{}, MaxOccPerMin: 30}
+	// Auto-provision the projects table from existing event rows so upgraded
+	// volumes carry their producers as unsigned legacy projects (#157).
+	if err := s.ProvisionProjects(); err != nil {
+		s.Close()
+		return nil, fmt.Errorf("provision projects: %w", err)
+	}
+	return s, nil
 }
 
 // migrate applies additive migrations idempotently: pre-channel databases
@@ -161,6 +168,11 @@ func migrate(db *sql.DB) error {
 		{"profiles.trace_id", `ALTER TABLE profiles ADD COLUMN trace_id TEXT NOT NULL DEFAULT ''`},
 		{"idx_profiles_trace", `CREATE INDEX IF NOT EXISTS idx_profiles_trace ON profiles(trace_id, created_at DESC)`},
 		{"profiles.tree", `ALTER TABLE profiles ADD COLUMN tree TEXT`},
+		{"projects", `CREATE TABLE IF NOT EXISTS projects (
+	key TEXT PRIMARY KEY,
+	ingest_key TEXT NOT NULL DEFAULT '',
+	created_at INTEGER NOT NULL DEFAULT 0,
+	rotated_at INTEGER NOT NULL DEFAULT 0)`},
 	} {
 		if _, err := db.Exec(m.stmt); err != nil {
 			// Idempotent: only "already applied" failures may pass through.

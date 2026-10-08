@@ -65,6 +65,7 @@ tr.resolved{opacity:.5}
 
 button{font:inherit;color:var(--text);background:var(--panel2);border:1px solid var(--border2);border-radius:6px;padding:.4rem .8rem;cursor:pointer}
 button:hover{border-color:var(--accent);color:var(--accent)}
+.flash{background:rgba(77,159,255,.08);border:1px solid rgba(77,159,255,.35);border-radius:8px;padding:.6rem .9rem;margin:.8rem 0}
 form.inline{display:inline}
 
 pre{font:12.5px/1.55 var(--mono);background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:.75rem .9rem;overflow-x:auto;margin:.5rem 0}
@@ -135,6 +136,7 @@ summary::marker{color:var(--faint)}
     <a href="/logs?project={{.Project}}"{{if eq .Page "logs"}} class="active"{{end}}>Logs</a>
     <a href="/profiles?project={{.Project}}"{{if eq .Page "profiles"}} class="active"{{end}}>Profiles</a>
     <a href="/slowest?project={{.Project}}"{{if eq .Page "slowest"}} class="active"{{end}}>Slowest</a>
+    <a href="/keys"{{if eq .Page "keys"}} class="active"{{end}}>Keys</a>
   </nav>
   {{with .Projects}}{{if gt (len .) 0}}
   <div class="projects">
