@@ -143,6 +143,7 @@ summary::marker{color:var(--faint)}
     <a href="/logs?project={{.Project}}"{{if eq .Page "logs"}} class="active"{{end}}>Logs</a>
     <a href="/profiles?project={{.Project}}"{{if eq .Page "profiles"}} class="active"{{end}}>Profiles</a>
     <a href="/slowest?project={{.Project}}"{{if eq .Page "slowest"}} class="active"{{end}}>Slowest</a>
+    <a href="/queries?project={{.Project}}"{{if eq .Page "queries"}} class="active"{{end}}>Queries</a>
     <a href="/keys"{{if eq .Page "keys"}} class="active"{{end}}>Keys</a>
   </nav>
   {{with .Projects}}{{if gt (len .) 0}}

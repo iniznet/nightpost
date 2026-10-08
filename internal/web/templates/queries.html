@@ -1,0 +1,22 @@
+{{define "title"}}Slow queries — fenrirealm-monitor{{end}}
+{{define "content"}}
+<h1>Slow queries</h1>
+<p class="faint">Statement shapes ranked by total time over the window — literals, ids and numbers normalized, so parameterized variants group together.</p>
+{{if .Rows}}
+<table>
+<thead><tr><th>SQL</th><th>Total</th><th>Count</th><th>Avg</th><th>Max</th><th>Last seen</th></tr></thead>
+<tbody>
+{{range .Rows}}
+<tr>
+  <td class="mono sql-cell" title="{{.SQL}}">{{.SQL}}</td>
+  <td class="num"><span class="inline-bar"><span class="fill hot-fill" style="width:{{pct .TotalMs $.MaxTotal}}%"></span></span><span class="mono">{{ms .TotalMs}}</span></td>
+  <td class="num">{{.Count}}</td>
+  <td class="num">{{ms .AvgMs}}</td>
+  <td class="num">{{ms .MaxMs}}</td>
+  <td class="dim" title="{{.LastSeen.Format "2006-01-02 15:04:05"}}">{{rel .LastSeen}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{else}}<p class="empty">No slow queries captured yet — enable MONITOR_SLOW_QUERY_MS on the backend.</p>{{end}}
+{{end}}

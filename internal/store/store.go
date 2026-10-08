@@ -188,6 +188,17 @@ func migrate(db *sql.DB) error {
 	sent_at INTEGER NOT NULL)`},
 		{"idx_alerts_target", `CREATE INDEX IF NOT EXISTS idx_alerts_target ON alerts_log(rule, target_key, sent_at DESC)`},
 		{"idx_alerts_channel", `CREATE INDEX IF NOT EXISTS idx_alerts_channel ON alerts_log(channel, sent_at DESC)`},
+		{"query_stats", `CREATE TABLE IF NOT EXISTS query_stats (
+	project_key TEXT NOT NULL,
+	fingerprint TEXT NOT NULL,
+	sql TEXT NOT NULL,
+	count INTEGER NOT NULL DEFAULT 1,
+	total_ms REAL NOT NULL DEFAULT 0,
+	max_ms REAL NOT NULL DEFAULT 0,
+	first_seen_at INTEGER NOT NULL,
+	last_seen_at INTEGER NOT NULL,
+	PRIMARY KEY(project_key, fingerprint))`},
+		{"idx_query_stats", `CREATE INDEX IF NOT EXISTS idx_query_stats ON query_stats(last_seen_at DESC)`},
 	} {
 		if _, err := db.Exec(m.stmt); err != nil {
 			// Idempotent: only "already applied" failures may pass through.

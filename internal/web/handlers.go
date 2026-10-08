@@ -170,6 +170,7 @@ const (
 	PageSlowest   Page = "slowest"
 	PageTrace     Page = "trace"
 	PageKeys      Page = "keys"
+	PageQueries   Page = "queries"
 	PageLogin     Page = "login"
 	PageSetup     Page = "setup"
 )
@@ -181,6 +182,13 @@ var funcMap = template.FuncMap{
 	"mb":    fmtMB,
 	"fn":    prettifyFn,
 	"pct":   func(v, max float64) string { return strconv.FormatFloat(pctOf(v, max), 'f', 1, 64) },
+	"trunc": func(s string, n int) string {
+		r := []rune(s)
+		if len(r) <= n {
+			return s
+		}
+		return string(r[:n]) + "…"
+	},
 	"pcti": func(v, max int64) string {
 		if max <= 0 {
 			return "0.0"
@@ -277,6 +285,7 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *A
 	slowestTmpl := mustLayout("slowest.html")
 	traceTmpl := mustLayout("trace.html")
 	keysTmpl := mustLayout("keys.html")
+	queriesTmpl := mustLayout("queries.html")
 
 	// Pages mount on an inner mux so a single auth gate covers every route
 	// (including future ones) by construction; login/setup/logout and the
@@ -390,6 +399,9 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *A
 		}
 		if stats, serr := st.Stats(); serr == nil {
 			data["StoreStats"] = stats
+		}
+		if top, qerr := st.QueryLeaderboard(project, 24, 5); qerr == nil && len(top) > 0 {
+			data["TopQueries"] = top
 		}
 		if err := dashboardTmpl.ExecuteTemplate(w, "layout", data); err != nil {
 			log.Printf("render dashboard: %v", err)
@@ -619,6 +631,40 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *A
 		data["TraceID"] = id
 		if err := traceTmpl.ExecuteTemplate(w, "layout", data); err != nil {
 			log.Printf("render trace: %v", err)
+		}
+	})
+
+	page.HandleFunc("GET /queries", func(w http.ResponseWriter, r *http.Request) {
+		project := r.URL.Query().Get("project")
+		data := baseData(st, project, PageQueries)
+		aggs, err := st.QueryLeaderboard(project, 24, 50)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		type QueryRow struct {
+			SQL, Fingerprint string
+			Count            int64
+			TotalMs, AvgMs   float64
+			MaxMs            float64
+			LastSeen         time.Time
+		}
+		rows := make([]QueryRow, 0, len(aggs))
+		var maxTotal float64
+		for _, a := range aggs {
+			if a.TotalMs > maxTotal {
+				maxTotal = a.TotalMs
+			}
+			avg := 0.0
+			if a.Count > 0 {
+				avg = a.TotalMs / float64(a.Count)
+			}
+			rows = append(rows, QueryRow{SQL: a.SQL, Fingerprint: a.Fingerprint, Count: a.Count, TotalMs: a.TotalMs, AvgMs: avg, MaxMs: a.MaxMs, LastSeen: a.LastSeen})
+		}
+		data["Rows"] = rows
+		data["MaxTotal"] = maxTotal
+		if err := queriesTmpl.ExecuteTemplate(w, "layout", data); err != nil {
+			log.Printf("render queries: %v", err)
 		}
 	})
 
