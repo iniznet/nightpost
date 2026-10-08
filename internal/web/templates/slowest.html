@@ -4,12 +4,13 @@
 <p class="faint">Self-time leaderboard aggregated across the most recent callgraph profiles of this project.</p>
 {{if .Rows}}
 <table>
-<thead><tr><th>Function</th><th>File</th><th>Total self</th><th>Avg</th><th>Samples</th><th>Last seen</th></tr></thead>
+<thead><tr><th>Function</th><th>File</th><th>Hottest sample</th><th>Total self</th><th>Avg</th><th>Samples</th><th>Last seen</th></tr></thead>
 <tbody>
 {{range .Rows}}
 <tr>
-  <td class="mono">{{.Function}}</td>
+  <td class="mono" title="{{.Function}}">{{fn .Function}}</td>
   <td class="mono dim">{{or .File "—"}}</td>
+  <td class="mono dim">{{if .SampleProfileID}}<a href="/profiles/{{.SampleProfileID}}">{{or .SampleProfile "profile"}}</a>{{else}}—{{end}}</td>
   <td class="num"><span class="inline-bar"><span class="fill hot-fill" style="width:{{pct .TotalSelfMs $.MaxSelf}}%"></span></span><span class="mono">{{ms .TotalSelfMs}}</span></td>
   <td class="num">{{ms .AvgSelfMs}}</td>
   <td class="num">{{.Samples}}</td>

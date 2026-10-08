@@ -253,11 +253,15 @@ func (s *Store) insertOccurrence(issueID int64, kind string, payload any, now in
 }
 
 // IssueQuery selects issues for the UI: every zero-value field is a no-op
-// filter, Status is "open", "resolved" or "all" (empty = all), BeforeID is
-// the keyset cursor for "older than" pagination.
+// filter, Status is "open", "resolved" or "all" (empty = all), Sort is
+// "recent" (default, last_seen_at DESC) or "pain" (count DESC — recurring
+// noise ranks above one-off noise), and BeforeID/BeforeCount form the
+// matching keyset cursor for "older than" pagination.
 type IssueQuery struct {
 	Project, Type, Level, Env, Channel, Status, Q string
+	Sort                                          string
 	BeforeID                                      int64
+	BeforeCount                                   int64
 	Limit                                         int
 }
 
@@ -266,6 +270,25 @@ func (s *Store) Issues(q IssueQuery) ([]Issue, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
+	cursor := `AND (? <= 0 OR id < ?)`
+	order := `ORDER BY last_seen_at DESC, id DESC`
+	cursorArgs := []any{q.BeforeID, q.BeforeID}
+	if q.Sort == "pain" {
+		cursor = `AND (? <= 0 OR (count < ? OR (count = ? AND id < ?)))`
+		order = `ORDER BY count DESC, id DESC`
+		cursorArgs = []any{q.BeforeCount, q.BeforeCount, q.BeforeCount, q.BeforeID}
+	}
+	args := []any{
+		q.Project, q.Project,
+		q.Type, q.Type,
+		q.Level, q.Level,
+		q.Env, q.Env,
+		q.Channel, q.Channel,
+		q.Q, q.Q,
+		q.Status,
+	}
+	args = append(args, cursorArgs...)
+	args = append(args, limit)
 	rows, err := s.rdb.Query(`SELECT id, project_key, fingerprint, type, title, exception_class, level, environment, channel, count, first_seen_at, last_seen_at, resolved
 		FROM issues
 		WHERE (? = '' OR project_key = ?)
@@ -275,17 +298,9 @@ func (s *Store) Issues(q IssueQuery) ([]Issue, error) {
 		  AND (? = '' OR channel = ?)
 		  AND (? = '' OR title LIKE '%' || ? || '%')
 		  AND (CASE ? WHEN 'open' THEN resolved = 0 WHEN 'resolved' THEN resolved = 1 ELSE 1 END)
-		  AND (? <= 0 OR id < ?)
-		ORDER BY last_seen_at DESC, id DESC LIMIT ?`,
-		q.Project, q.Project,
-		q.Type, q.Type,
-		q.Level, q.Level,
-		q.Env, q.Env,
-		q.Channel, q.Channel,
-		q.Q, q.Q,
-		q.Status,
-		q.BeforeID, q.BeforeID,
-		limit)
+	`+cursor+`
+		`+order+` LIMIT ?`,
+		args...)
 	if err != nil {
 		return nil, err
 	}

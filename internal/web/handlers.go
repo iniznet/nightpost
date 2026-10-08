@@ -6,6 +6,7 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"regexp"
 	"net/url"
 	"strconv"
 	"strings"
@@ -29,6 +30,131 @@ const (
 
 type issueFilter struct {
 	Type, Level, Env, Channel, Status, Q string
+	Sort                                 string
+}
+
+// notFoundPrefix marks the per-path 404 family that floods the issues list.
+const notFoundPrefix = "Not found: "
+
+// collapseNotFound folds the per-path "Not found: <path>" issues on one page
+// into a single synthetic row (ID 0, rendered as a link to the filtered
+// drill-down) so 404 noise cannot bury real errors beneath it.
+func collapseNotFound(issues []store.Issue) []store.Issue {
+	first := -1
+	var paths, total int64
+	for i, is := range issues {
+		if strings.HasPrefix(is.Title, notFoundPrefix) {
+			if first < 0 {
+				first = i
+			}
+			paths++
+			total += is.Count
+		}
+	}
+	if first < 0 {
+		return issues
+	}
+	group := store.Issue{
+		Title:      fmt.Sprintf("Not found — %d paths on this page", paths),
+		Type:       "error",
+		Level:      "error",
+		Count:      total,
+		LastSeenAt: issues[first].LastSeenAt,
+	}
+	out := make([]store.Issue, 0, len(issues)-int(paths)+1)
+	for i, is := range issues {
+		if i == first {
+			out = append(out, group)
+		}
+		if !strings.HasPrefix(is.Title, notFoundPrefix) {
+			out = append(out, is)
+		}
+	}
+	return out
+}
+
+// nsRe strips PHP namespace prefixes ("Illuminate\\Database\\") from
+// prettified function labels.
+var nsRe = regexp.MustCompile(`[A-Za-z0-9_]+\\`)
+
+// innermostClosure finds the innermost "{closure:...}" span whose content
+// holds no nested braces; xhprof names nest closures up to a few levels deep.
+func innermostClosure(s string) (start, end int, ok bool) {
+	for i := 0; i+9 <= len(s); i++ {
+		if s[i:i+9] != "{closure:" {
+			continue
+		}
+		depth := 0
+		for j := i; j < len(s); j++ {
+			switch s[j] {
+			case '{':
+				depth++
+			case '}':
+				depth--
+				if depth == 0 {
+					if !strings.ContainsAny(s[i+9:j], "{}") {
+						return i, j + 1, true
+					}
+				}
+			}
+		}
+	}
+	return 0, 0, false
+}
+
+// prettifyFn collapses xhprof closure noise —
+// "Pkg\Class::{closure:Pkg\Class::method():398}" — to the method that
+// defines the closure, with the class name shortened to its last segment.
+func prettifyFn(name string) string {
+	s := name
+	closures := 0
+	for {
+		i, end, ok := innermostClosure(s)
+		if !ok {
+			break
+		}
+		s = s[:i] + s[i+9:end-1] + s[end:]
+		closures++
+	}
+	s = nsRe.ReplaceAllString(s, "")
+	// A closure unwrap chain stacks several "Class::" prefixes; only the
+	// innermost "Class::method" pair is the interesting frame.
+	parts := strings.Split(s, "::")
+	if len(parts) > 2 {
+		s = parts[len(parts)-2] + "::" + parts[len(parts)-1]
+	}
+	// A pipeline frame carries a "@<depth>" suffix; park it while tidying.
+	var tail string
+	if k := strings.LastIndex(s, "@"); k >= 0 && isDigits(s[k+1:]) {
+		tail = s[k:]
+		s = s[:k]
+	}
+	// Each unwrapped closure level leaves its own trailing ":<line>";
+	// strip all but the defining method's line number.
+	for i := 0; i < closures-1; i++ {
+		if k := strings.LastIndex(s, ":"); k >= 0 && isDigits(s[k+1:]) {
+			s = s[:k]
+		}
+	}
+	switch {
+	case closures == 1:
+		s += " (closure)"
+	case closures > 1:
+		s += fmt.Sprintf(" (closure ×%d)", closures)
+	}
+	return s + tail
+}
+
+func isDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 type ProjectRow struct {
@@ -48,6 +174,7 @@ var funcMap = template.FuncMap{
 	"spark": sparkPoints,
 	"ms":    fmtMs,
 	"mb":    fmtMB,
+	"fn":    prettifyFn,
 	"pct":   func(v, max float64) string { return strconv.FormatFloat(pctOf(v, max), 'f', 1, 64) },
 	"pcti": func(v, max int64) string {
 		if max <= 0 {
@@ -147,35 +274,28 @@ func Register(mux *http.ServeMux, st *store.Store) {
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		project := r.URL.Query().Get("project")
 		data := baseData(st, project, PageDashboard)
+		summaries, err := st.DashboardSummaries(24)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		if project == "" {
-			rows := make([]ProjectRow, 0, len(data["Projects"].([]string)))
-			for _, p := range data["Projects"].([]string) {
-				sum, err := st.ProjectSummary(p)
-				if err != nil {
-					log.Printf("summary %s: %v", p, err)
-					continue
-				}
-				trend, err := st.HourBuckets(p, 24, "error")
-				if err != nil {
-					log.Printf("trend %s: %v", p, err)
-					continue
-				}
-				rows = append(rows, ProjectRow{Summary: sum, Trend: trend})
+			rows := make([]ProjectRow, 0, len(summaries))
+			for _, s := range summaries {
+				rows = append(rows, ProjectRow{Summary: s.Summary, Trend: s.Trend})
 			}
 			data["All"] = true
 			data["Rows"] = rows
 		} else {
-			sum, err := st.ProjectSummary(project)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
+			var sum store.ProjectSummary
+			var trend []int64
+			for _, s := range summaries {
+				if s.Summary.Project == project {
+					sum, trend = s.Summary, s.Trend
+					break
+				}
 			}
-			trend, err := st.HourBuckets(project, 24, "error")
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			recent, err := st.Issues(store.IssueQuery{Project: project, Status: "open", Limit: 8})
+			recent, err := st.Issues(store.IssueQuery{Project: project, Status: "open", Limit: 8, Sort: "pain"})
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
@@ -216,11 +336,19 @@ func Register(mux *http.ServeMux, st *store.Store) {
 		if f.Status == "" {
 			f.Status = "open"
 		}
+		// Pain order (count DESC) is the default: a wall of recent one-offs
+		// otherwise buries the recurring noise that actually hurts.
+		f.Sort = r.URL.Query().Get("sort")
+		if f.Sort != "recent" {
+			f.Sort = "pain"
+		}
 		issues, err := st.Issues(store.IssueQuery{
 			Project: project, Type: f.Type, Level: f.Level, Env: f.Env, Q: f.Q,
-			Status:   f.Status,
-			BeforeID: parseID(r.URL.Query().Get("before")),
-			Limit:    50,
+			Status:      f.Status,
+			Sort:        f.Sort,
+			BeforeID:    parseID(r.URL.Query().Get("before")),
+			BeforeCount: parseID(r.URL.Query().Get("beforecount")),
+			Limit:       50,
 		})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -228,8 +356,14 @@ func Register(mux *http.ServeMux, st *store.Store) {
 		}
 		spark, _ := st.IssueSparklines(project, 24)
 		envs, _ := st.Environments(project)
+		// The per-path 404 family collapses into one row unless the user is
+		// already drilling into it via the title search.
+		shown := issues
+		if f.Q == "" {
+			shown = collapseNotFound(issues)
+		}
 		data := baseData(st, project, PageIssues)
-		data["Issues"] = issues
+		data["Issues"] = shown
 		data["Spark"] = spark
 		data["Filter"] = f
 		data["Envs"] = envs
@@ -241,7 +375,9 @@ func Register(mux *http.ServeMux, st *store.Store) {
 			v.Set("env", f.Env)
 			v.Set("status", f.Status)
 			v.Set("q", f.Q)
+			v.Set("sort", f.Sort)
 			v.Set("before", strconv.FormatInt(issues[len(issues)-1].ID, 10))
+			v.Set("beforecount", strconv.FormatInt(issues[len(issues)-1].Count, 10))
 			data["NextURL"] = "/issues?" + v.Encode()
 		}
 		if err := issuesTmpl.ExecuteTemplate(w, "layout", data); err != nil {
@@ -321,13 +457,36 @@ func Register(mux *http.ServeMux, st *store.Store) {
 	mux.HandleFunc("GET /profiles", func(w http.ResponseWriter, r *http.Request) {
 		project := r.URL.Query().Get("project")
 		typeFilter := r.URL.Query().Get("type")
-		var profiles []store.Profile
-		var err error
-		if typeFilter == "request" || typeFilter == "callgraph" {
-			profiles, err = st.ProfilesByType(project, typeFilter, 50)
-		} else {
-			profiles, err = st.Profiles(project, 50)
+		view := r.URL.Query().Get("view")
+		q := r.URL.Query().Get("q")
+		data := baseData(st, project, PageProfiles)
+		data["TypeF"] = typeFilter
+		data["View"] = view
+		data["Q"] = q
+		if view != "raw" && (typeFilter == store.ProfileTypeRequest || typeFilter == store.ProfileTypeCallgraph) {
+			// Aggregated-by-route is the default view: a flat recency list
+			// repeats the same hot route ten times and hides what actually
+			// accumulates wall-clock time.
+			routes, err := st.ProfileRouteStats(project, typeFilter, 24, 50)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			data["Routes"] = routes
+			var maxTotal float64
+			for _, ra := range routes {
+				if ra.TotalMs > maxTotal {
+					maxTotal = ra.TotalMs
+				}
+			}
+			data["MaxTotal"] = maxTotal
+			data["Profiles"] = nil
+			if err := profilesTmpl.ExecuteTemplate(w, "layout", data); err != nil {
+				log.Printf("render profiles: %v", err)
+			}
+			return
 		}
+		profiles, err := st.ProfilesFiltered(project, typeFilter, q, 50)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -338,10 +497,8 @@ func Register(mux *http.ServeMux, st *store.Store) {
 				maxDur = p.DurationMs
 			}
 		}
-		data := baseData(st, project, PageProfiles)
 		data["Profiles"] = profiles
 		data["MaxDur"] = maxDur
-		data["TypeF"] = typeFilter
 		if err := profilesTmpl.ExecuteTemplate(w, "layout", data); err != nil {
 			log.Printf("render profiles: %v", err)
 		}

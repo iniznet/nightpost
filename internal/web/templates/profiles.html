@@ -3,10 +3,46 @@
 <h1>Profiles</h1>
 <div class="filterbar">
   <span class="label">type</span>
-  <a href="?project={{.Project}}" class="pill{{if eq .TypeF ""}} on{{end}}">all</a>
-  <a href="?project={{.Project}}&type=request" class="pill{{if eq .TypeF "request"}} on{{end}}">request</a>
-  <a href="?project={{.Project}}&type=callgraph" class="pill{{if eq .TypeF "callgraph"}} on{{end}}">callgraph</a>
+  <a href="?project={{.Project}}{{if eq .View "raw"}}&view=raw{{end}}{{if .Q}}&q={{urlquery .Q}}{{end}}" class="pill{{if eq .TypeF ""}} on{{end}}">all</a>
+  <a href="?project={{.Project}}&type=request{{if eq .View "raw"}}&view=raw{{end}}{{if .Q}}&q={{urlquery .Q}}{{end}}" class="pill{{if eq .TypeF "request"}} on{{end}}">request</a>
+  <a href="?project={{.Project}}&type=callgraph{{if eq .View "raw"}}&view=raw{{end}}{{if .Q}}&q={{urlquery .Q}}{{end}}" class="pill{{if eq .TypeF "callgraph"}} on{{end}}">callgraph</a>
+{{if .Routes}}
+  <span class="label">view</span>
+  <a href="?project={{.Project}}&type={{.TypeF}}" class="pill on">aggregated</a>
+  <a href="?project={{.Project}}&type={{.TypeF}}&view=raw" class="pill">raw list</a>
+  <span class="faint">last 24h · sorted by total time</span>
+{{else}}
+  <span class="label">view</span>
+  <a href="?project={{.Project}}{{if .TypeF}}&type={{.TypeF}}{{end}}" class="pill on">raw list</a>
+  {{if .TypeF}}<a href="?project={{.Project}}&type={{.TypeF}}" class="pill">aggregated</a>{{end}}
+{{end}}
 </div>
+{{if .Routes}}
+<table>
+<thead><tr><th>Route</th><th>Count</th><th>Total</th><th>Avg</th><th>p95</th><th>Max</th><th>Last seen</th></tr></thead>
+<tbody>
+{{range .Routes}}
+<tr>
+  <td><a href="?project={{$.Project}}&type={{$.TypeF}}&view=raw&q={{urlquery .Name}}" title="show raw samples for this route">{{.Name}}</a></td>
+  <td class="num">{{.Count}}</td>
+  <td class="num"><span class="inline-bar"><span class="fill hot-fill" style="width:{{pct .TotalMs $.MaxTotal}}%"></span></span><span class="mono">{{ms .TotalMs}}</span></td>
+  <td class="num">{{ms .AvgMs}}</td>
+  <td class="num">{{ms .P95Ms}}</td>
+  <td class="num">{{ms .MaxMs}}</td>
+  <td class="dim" title="{{.LastSeen.Format "2006-01-02 15:04:05"}}">{{rel .LastSeen}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+<p class="faint">Aggregates cover the most recent 20,000 samples of the window.</p>
+{{else}}
+<form class="filterbar" method="get" action="/profiles">
+  <input type="hidden" name="project" value="{{.Project}}">
+  {{if .TypeF}}<input type="hidden" name="type" value="{{.TypeF}}">{{end}}
+  <input type="hidden" name="view" value="raw">
+  <input type="search" name="q" value="{{.Q}}" placeholder="Search route names">
+  <button>Apply</button>
+</form>
 {{if .Profiles}}
 <table>
 <thead><tr><th>Name</th><th>Type</th><th>Project</th><th>Duration</th><th>Env</th><th>Spans</th><th>Hotspots</th><th>Recorded</th></tr></thead>
@@ -26,4 +62,5 @@
 </tbody>
 </table>
 {{else}}<p class="empty">No profiles recorded yet.</p>{{end}}
+{{end}}
 {{end}}
