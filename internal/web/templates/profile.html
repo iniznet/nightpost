@@ -18,7 +18,11 @@
 </div>
 {{end}}
 {{end}}
-{{if .Profile.Hotspots}}
+{{if .Tree}}
+<h2>Call tree</h2>
+{{range .Tree}}{{template "treeNode" .}}{{end}}
+{{end}}
+{{if and .Profile.Hotspots (not .Tree)}}
 <h2>Hotspots (self time)</h2>
 {{range .Profile.Hotspots}}
 <div class="bar-row">
@@ -27,5 +31,15 @@
   <div class="num mono dim">{{ms .SelfMs}}{{if .Calls}} · {{.Calls}}×{{end}}</div>
 </div>
 {{end}}
+{{end}}
+{{end}}
+{{define "treeNode"}}
+{{if .Children}}
+<details class="tn"{{if lt .Depth 2}} open{{end}}>
+  <summary><span class="tn-name mono" title="{{.Name}}">{{.Name}}</span><span class="tn-bar"><span class="fill wf-fill" style="width:{{.Width}}%"></span></span><span class="mono tn-num">{{ms .InclMs}}{{if .Calls}} · {{.Calls}}×{{end}}</span></summary>
+  {{range .Children}}{{template "treeNode" .}}{{end}}
+</details>
+{{else}}
+<div class="tn tn-leaf"><span class="tn-name mono" title="{{.Name}}">{{.Name}}</span><span class="tn-bar"><span class="fill wf-fill" style="width:{{.Width}}%"></span></span><span class="mono tn-num">{{ms .InclMs}}{{if .Calls}} · {{.Calls}}×{{end}}</span></div>
 {{end}}
 {{end}}

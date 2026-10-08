@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -160,6 +161,69 @@ func TestTracePageRendersHotspots(t *testing.T) {
 	}
 	text := string(body)
 	for _, want := range []string{"hotspots (self time)", "Connection::select"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("trace page missing %q", want)
+		}
+	}
+}
+
+// #181: the stored tree renders as a collapsible stack on both the profile
+// detail page and the trace page (tree preferred over the flat list).
+func TestProfilePageRendersCallTree(t *testing.T) {
+	srv, st := newTestServer(t)
+	id, err := st.RecordProfile(store.ProfileInput{
+		ProjectKey: "front", Type: store.ProfileTypeRequest, Name: "GET /tree", DurationMs: 1000,
+		Tree: []store.TreeNode{{N: "render()", S: 400, I: 1000, K: []store.TreeNode{
+			{N: "awaitFetch()", S: 600, I: 600},
+		}}},
+	})
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	resp, err := http.Get(srv.URL + "/profiles/" + strconv.FormatInt(id, 10))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	text := string(body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	for _, want := range []string{"Call tree", "render()", "awaitFetch()", "<details"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("profile page missing %q", want)
+		}
+	}
+}
+
+func TestTracePageRendersLegTrees(t *testing.T) {
+	srv, st := newTestServer(t)
+	if _, err := st.RecordProfile(store.ProfileInput{
+		ProjectKey: "front", Type: store.ProfileTypeRequest, Name: "GET /p", DurationMs: 1000, TraceID: "t-trees",
+		Spans: []store.Span{{Name: "backend fetch", DurationMs: 500, StartMs: 100, Tags: map[string]any{"leg": "backend"}}},
+	}); err != nil {
+		t.Fatalf("seed front: %v", err)
+	}
+	if _, err := st.RecordProfile(store.ProfileInput{
+		ProjectKey: "backend", Type: store.ProfileTypeCallgraph, Name: "Fenrir Realm @ n1", DurationMs: 480, TraceID: "t-trees",
+		Tree: []store.TreeNode{{N: "main()", S: 80, I: 480, K: []store.TreeNode{
+			{N: "Illuminate\\Database\\Connection::select", S: 400, I: 400, C: 2},
+		}}},
+	}); err != nil {
+		t.Fatalf("seed callgraph: %v", err)
+	}
+	resp, err := http.Get(srv.URL + "/traces/t-trees")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	text := string(body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	for _, want := range []string{"call tree", "main()", "Connection::select", "<details"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("trace page missing %q", want)
 		}
