@@ -192,6 +192,7 @@ func migrate(db *sql.DB) error {
 	project_key TEXT NOT NULL,
 	fingerprint TEXT NOT NULL,
 	sql TEXT NOT NULL,
+	connection TEXT NOT NULL DEFAULT '',
 	count INTEGER NOT NULL DEFAULT 1,
 	total_ms REAL NOT NULL DEFAULT 0,
 	max_ms REAL NOT NULL DEFAULT 0,

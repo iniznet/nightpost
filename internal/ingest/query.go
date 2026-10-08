@@ -15,6 +15,7 @@ type queryPayload struct {
 	SQL         string  `json:"sql"`
 	TimeMs      float64 `json:"time_ms"`
 	Environment string  `json:"environment"`
+	Connection  string  `json:"connection"`
 }
 
 const maxQuerySQL = 8192
@@ -43,7 +44,12 @@ func QueryHandler(st *store.Store) http.HandlerFunc {
 			http.Error(w, "time_ms out of range", http.StatusUnprocessableEntity)
 			return
 		}
-		if _, err := st.RecordQuery(project, p.SQL, p.TimeMs, p.Environment); err != nil {
+		conn := p.Connection
+		if len(conn) > 64 {
+			http.Error(w, "connection oversized", http.StatusUnprocessableEntity)
+			return
+		}
+		if _, err := st.RecordQuery(project, p.SQL, p.TimeMs, conn, p.Environment); err != nil {
 			http.Error(w, "store failure", http.StatusInternalServerError)
 			return
 		}

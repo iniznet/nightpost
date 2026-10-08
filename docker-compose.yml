@@ -22,6 +22,13 @@
 # prunes occurrences older than -retention-days (default 30), caps each
 # issue's occurrence history at 50 and keeps the newest 5000 profiles.
 # Tighten with -retention-days / -prune-interval in the service command.
+#
+# M4 (#157): the dashboard now requires login (first visit = /setup). Set a
+# stable -session-secret (else logins die on every restart) and optionally
+# -alerts-config /path/alerts.json (mounted secret file; channels + rules).
+# Lost admin: one-off `docker exec ... monitor -reset-admin <email>` prints
+# a fresh password once. Ingest keys rotate at /keys; unsigned legacy ingest
+# still works until a key is issued.
 
 services:
   monitor:

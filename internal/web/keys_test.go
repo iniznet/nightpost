@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,8 @@ import (
 	"github.com/iniznet/fenrirealm-monitor/internal/ingest"
 	"github.com/iniznet/fenrirealm-monitor/internal/store"
 )
+
+var flashRe = regexp.MustCompile(`class="mono">([0-9a-f]{48})<`)
 
 func openKeysStore(t *testing.T) *store.Store {
 	t.Helper()
@@ -59,12 +62,17 @@ func TestKeysPageRotateFlow(t *testing.T) {
 		t.Fatal("rotation must flash the new key")
 	}
 
-	key, err := st.ProjectIngestKey("alpha")
-	if err != nil || len(key) != 48 {
-		t.Fatalf("store must hold a 48-hex key, got %q (err %v)", key, err)
+	m := flashRe.FindStringSubmatch(body)
+	if m == nil {
+		t.Fatal("rotation response must flash a 48-hex secret")
 	}
-	if !strings.Contains(body, key) {
-		t.Fatal("flashed key must equal the stored key")
+	flashed := m[1]
+	stored, err := st.ProjectIngestKey("alpha")
+	if err != nil || stored != store.HashIngestKey(flashed) {
+		t.Fatalf("store must hold the sha256 of the flashed secret, got %q (err %v)", stored, err)
+	}
+	if strings.Contains(body, stored) {
+		t.Fatal("the stored hash must never appear in the page")
 	}
 
 	// The gate must reject the project's old (absent) key immediately after
@@ -82,10 +90,32 @@ func TestKeysPageRotateFlow(t *testing.T) {
 	}
 	r3 := httptest.NewRecorder()
 	okReq := httptest.NewRequest(http.MethodPost, "/ingest/alpha/sentry", nil)
-	okReq.Header.Set("X-Monitor-Key", key)
+	okReq.Header.Set("X-Monitor-Key", flashed)
 	ingestMux.ServeHTTP(r3, okReq)
 	if r3.Code != http.StatusAccepted {
 		t.Fatalf("correct key must be accepted after rotation, got %d", r3.Code)
+	}
+}
+
+func TestKeysRotateRejectsCrossOrigin(t *testing.T) {
+	st := openKeysStore(t)
+	mux := http.NewServeMux()
+	Register(mux, st, nil, nil)
+	req := httptest.NewRequest(http.MethodPost, "/keys/rotate", strings.NewReader("project=alpha"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "http://evil.example")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin rotate must 403, got %d", rec.Code)
+	}
+	req2 := httptest.NewRequest(http.MethodPost, "/keys/rotate", strings.NewReader("project=alpha"))
+	req2.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req2.Header.Set("Origin", "http://example.com")
+	rec2 := httptest.NewRecorder()
+	mux.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("same-origin rotate must pass, got %d", rec2.Code)
 	}
 }
 

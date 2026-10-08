@@ -2,11 +2,20 @@ package store
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"time"
 )
+
+// HashIngestKey renders the at-rest form of an ingest secret. Only the
+// SHA-256 is stored (keys are 192-bit random, so unsalted hashing is the
+// right trade): a leaked database cannot mint signed ingest requests.
+func HashIngestKey(secret string) string {
+	sum := sha256.Sum256([]byte(secret))
+	return hex.EncodeToString(sum[:])
+}
 
 // Project carries the ingest-key state for one producer project. Projects
 // are configuration, not events: the retention loop must never prune this
@@ -41,7 +50,7 @@ func (s *Store) EnsureProject(key string) error {
 	return err
 }
 
-// ProjectIngestKey returns the stored key for a project; "" means the
+// ProjectIngestKey returns the stored key HASH for a project; "" means the
 // project accepts unsigned legacy ingest. Unknown projects report "" too —
 // they are provisioned by the gate on first sight.
 func (s *Store) ProjectIngestKey(key string) (string, error) {
@@ -88,7 +97,7 @@ func (s *Store) RotateIngestKey(key string) (string, error) {
 	if err := s.EnsureProject(key); err != nil {
 		return "", err
 	}
-	if _, err := s.wdb.Exec(`UPDATE projects SET ingest_key = ?, rotated_at = CAST(strftime('%s','now') AS INTEGER) WHERE key = ?`, secret, key); err != nil {
+	if _, err := s.wdb.Exec(`UPDATE projects SET ingest_key = ?, rotated_at = CAST(strftime('%s','now') AS INTEGER) WHERE key = ?`, HashIngestKey(secret), key); err != nil {
 		return "", err
 	}
 	return secret, nil

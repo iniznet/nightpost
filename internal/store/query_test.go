@@ -10,13 +10,13 @@ func TestRecordQueryGroupsShapes(t *testing.T) {
 	st := newTestStore(t)
 	v1 := "select * from chapters where id = 42 and slug = 'abc'"
 	v2 := "select * from chapters where id = 43 and slug = 'zzz'"
-	if _, err := st.RecordQuery("backend", v1, 120, "production"); err != nil {
+	if _, err := st.RecordQuery("backend", v1, 120, "mysql", "production"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.RecordQuery("backend", v2, 30, "production"); err != nil {
+	if _, err := st.RecordQuery("backend", v2, 30, "mysql", "production"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.RecordQuery("backend", "select 1", 5, "production"); err != nil {
+	if _, err := st.RecordQuery("backend", "select 1", 5, "redis", "production"); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := st.QueryLeaderboard("backend", 24, 10)
@@ -36,9 +36,38 @@ func TestRecordQueryGroupsShapes(t *testing.T) {
 	if !strings.Contains(top.SQL, "chapters") {
 		t.Fatal("table names must survive normalization")
 	}
-	// Paired issue row exists with type=query.
+	if top.Connection != "mysql" {
+		t.Fatalf("connection must persist, got %q", top.Connection)
+	}
+	// Placeholder SQL from the Laravel producer must survive normalize()
+	// unchanged — one grouping authority across the wire.
+	if _, err := st.RecordQuery("backend", "select * from users where id = ?", 9, "mysql", "production"); err != nil {
+		t.Fatal(err)
+	}
+	ph := ForQuery("select * from users where id = ?")
+	found := false
+	for _, r := range rows {
+		if r.Fingerprint == ph {
+			found = true
+		}
+	}
+	if !found {
+		if fresh, ferr := st.QueryLeaderboard("backend", 24, 10); ferr != nil {
+			t.Fatal(ferr)
+		} else {
+			for _, r := range fresh {
+				if r.Fingerprint == ph {
+					found = true
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatal("placeholder-shaped sql must fingerprint stably")
+	}
+	// Paired issue rows exist with type=query.
 	issues, err := st.Issues(IssueQuery{Project: "backend", Type: "query", Status: "all", Limit: 10})
-	if err != nil || len(issues) != 2 {
+	if err != nil || len(issues) != 3 {
 		t.Fatalf("query issues: %d %v", len(issues), err)
 	}
 	want := ForQuery(v1)
@@ -55,7 +84,7 @@ func TestRecordQueryGroupsShapes(t *testing.T) {
 
 func TestPruneQueryStats(t *testing.T) {
 	st := newTestStore(t)
-	if _, err := st.RecordQuery("backend", "select 1", 5, "production"); err != nil {
+	if _, err := st.RecordQuery("backend", "select 1", 5, "mysql", "production"); err != nil {
 		t.Fatal(err)
 	}
 	n, err := st.PruneQueryStats(time.Now().Add(time.Hour).Unix(), 10)
@@ -80,5 +109,8 @@ func TestForQueryStable(t *testing.T) {
 	}
 	if ForQuery("select 1") == ForQuery("update t set x=1") {
 		t.Fatal("distinct statements must not collide")
+	}
+	if ForQuery("where id = ?") != ForQuery("where id = ?") {
+		t.Fatal("placeholder sql must be stable")
 	}
 }

@@ -322,6 +322,13 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *A
 			http.Error(w, "malformed form", http.StatusBadRequest)
 			return
 		}
+		if origin := r.Header.Get("Origin"); origin != "" {
+			u, uerr := url.Parse(origin)
+			if uerr != nil || !strings.EqualFold(u.Host, r.Host) {
+				http.Error(w, "cross-origin rotate rejected", http.StatusForbidden)
+				return
+			}
+		}
 		project := strings.TrimSpace(r.FormValue("project"))
 		if project == "" {
 			http.Error(w, "project required", http.StatusBadRequest)
@@ -644,6 +651,7 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *A
 		}
 		type QueryRow struct {
 			SQL, Fingerprint string
+			Connection       string
 			Count            int64
 			TotalMs, AvgMs   float64
 			MaxMs            float64
@@ -659,7 +667,7 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *A
 			if a.Count > 0 {
 				avg = a.TotalMs / float64(a.Count)
 			}
-			rows = append(rows, QueryRow{SQL: a.SQL, Fingerprint: a.Fingerprint, Count: a.Count, TotalMs: a.TotalMs, AvgMs: avg, MaxMs: a.MaxMs, LastSeen: a.LastSeen})
+			rows = append(rows, QueryRow{SQL: a.SQL, Fingerprint: a.Fingerprint, Connection: a.Connection, Count: a.Count, TotalMs: a.TotalMs, AvgMs: avg, MaxMs: a.MaxMs, LastSeen: a.LastSeen})
 		}
 		data["Rows"] = rows
 		data["MaxTotal"] = maxTotal

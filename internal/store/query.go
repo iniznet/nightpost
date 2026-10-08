@@ -12,6 +12,7 @@ import (
 type QueryAgg struct {
 	Fingerprint string
 	SQL         string
+	Connection  string
 	Count       int64
 	TotalMs     float64
 	MaxMs       float64
@@ -26,7 +27,7 @@ func ForQuery(sql string) string {
 
 // RecordQuery upserts the aggregate row and the paired issue. The issues
 // upsert mirrors RecordError's RETURNING pattern.
-func (s *Store) RecordQuery(projectKey, sql string, timeMs float64, environment string) (int64, error) {
+func (s *Store) RecordQuery(projectKey, sql string, timeMs float64, connection, environment string) (int64, error) {
 	now := time.Now().Unix()
 	norm := normalize(sql)
 	if len(norm) > 4000 {
@@ -49,14 +50,14 @@ func (s *Store) RecordQuery(projectKey, sql string, timeMs float64, environment 
 		return 0, fmt.Errorf("query issue upsert: %w", err)
 	}
 	if _, err := s.wdb.Exec(`INSERT INTO query_stats
-		(project_key, fingerprint, sql, count, total_ms, max_ms, first_seen_at, last_seen_at)
-		VALUES (?, ?, ?, 1, ?, ?, ?, ?)
+		(project_key, fingerprint, sql, connection, count, total_ms, max_ms, first_seen_at, last_seen_at)
+		VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)
 		ON CONFLICT(project_key, fingerprint) DO UPDATE SET
 			count = count + 1,
 			total_ms = total_ms + excluded.total_ms,
 			max_ms = CASE WHEN excluded.max_ms > max_ms THEN excluded.max_ms ELSE max_ms END,
 			last_seen_at = excluded.last_seen_at`,
-		projectKey, fp, norm, timeMs, timeMs, now, now); err != nil {
+		projectKey, fp, norm, connection, timeMs, timeMs, now, now); err != nil {
 		return issueID, fmt.Errorf("query stats upsert: %w", err)
 	}
 	return issueID, nil
@@ -71,7 +72,7 @@ func (s *Store) QueryLeaderboard(project string, hours, limit int) ([]QueryAgg, 
 		limit = 50
 	}
 	cutoff := time.Now().Add(-time.Duration(hours) * time.Hour).Unix()
-	rows, err := s.rdb.Query(`SELECT fingerprint, sql, count, total_ms, max_ms, last_seen_at
+	rows, err := s.rdb.Query(`SELECT fingerprint, sql, connection, count, total_ms, max_ms, last_seen_at
 		FROM query_stats
 		WHERE (? = '' OR project_key = ?) AND last_seen_at >= ?
 		ORDER BY total_ms DESC LIMIT ?`, project, project, cutoff, limit)
@@ -83,7 +84,7 @@ func (s *Store) QueryLeaderboard(project string, hours, limit int) ([]QueryAgg, 
 	for rows.Next() {
 		var q QueryAgg
 		var last int64
-		if err := rows.Scan(&q.Fingerprint, &q.SQL, &q.Count, &q.TotalMs, &q.MaxMs, &last); err != nil {
+		if err := rows.Scan(&q.Fingerprint, &q.SQL, &q.Connection, &q.Count, &q.TotalMs, &q.MaxMs, &last); err != nil {
 			return nil, err
 		}
 		q.LastSeen = time.Unix(last, 0)

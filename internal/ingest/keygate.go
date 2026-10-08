@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/iniznet/fenrirealm-monitor/internal/store"
 )
 
 // ProjectKeyStore is the store surface the gate needs: key lookup plus
@@ -123,7 +125,8 @@ func WithKeyGate(g *KeyGate, resolveProject func(*http.Request) string, next htt
 			return
 		}
 		if want != "" {
-			if !constantTimeEqual(want, presentedKey(r)) {
+			presented := presentedKey(r)
+			if presented == "" || !constantTimeEqual(want, store.HashIngestKey(presented)) {
 				http.Error(w, "invalid ingest key", http.StatusUnauthorized)
 				return
 			}

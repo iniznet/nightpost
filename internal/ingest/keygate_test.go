@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/iniznet/fenrirealm-monitor/internal/store"
 )
 
 type fakeKeys struct {
@@ -57,7 +59,7 @@ func post(gate *KeyGate, project, headerName, headerVal string) int {
 }
 
 func TestKeyGateUnsignedLegacyAndKeyed(t *testing.T) {
-	f := &fakeKeys{keys: map[string]string{"secured": "s3cret"}, ensured: map[string]int{}}
+	f := &fakeKeys{keys: map[string]string{"secured": store.HashIngestKey("s3cret")}, ensured: map[string]int{}}
 	g := NewKeyGate(f, 0)
 
 	if code := post(g, "open", "", ""); code != http.StatusAccepted {
@@ -91,13 +93,13 @@ func TestKeyGateUnsignedLegacyAndKeyed(t *testing.T) {
 }
 
 func TestKeyGateRotationInvalidates(t *testing.T) {
-	f := &fakeKeys{keys: map[string]string{"p": "v1"}, ensured: map[string]int{}}
+	f := &fakeKeys{keys: map[string]string{"p": store.HashIngestKey("v1")}, ensured: map[string]int{}}
 	g := NewKeyGate(f, time.Hour)
 
 	if code := post(g, "p", "X-Monitor-Key", "v1"); code != http.StatusAccepted {
 		t.Fatalf("v1 must pass before rotation, got %d", code)
 	}
-	f.set("p", "v2")
+	f.set("p", store.HashIngestKey("v2"))
 	if code := post(g, "p", "X-Monitor-Key", "v1"); code != http.StatusAccepted {
 		t.Fatalf("cached gate must keep serving v1 decision until Invalidate, got %d", code)
 	}

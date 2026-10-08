@@ -37,8 +37,11 @@ func TestProjectProvisionAndRotation(t *testing.T) {
 		t.Fatalf("expected 48 hex chars, got %d", len(key1))
 	}
 	got, err := st.ProjectIngestKey("alpha")
-	if err != nil || got != key1 {
-		t.Fatalf("lookup mismatch: %q vs %q (err %v)", got, key1, err)
+	if err != nil || got != HashIngestKey(key1) {
+		t.Fatalf("store must hold the sha256 of the minted secret: %q (err %v)", got, err)
+	}
+	if got == key1 || len(got) != 64 {
+		t.Fatalf("stored form must be a 64-hex hash, not the secret (%d)", len(got))
 	}
 	key2, err := st.RotateIngestKey("alpha")
 	if err != nil {

@@ -32,11 +32,11 @@ func postQuery(t *testing.T, st *store.Store, body string) int {
 
 func TestQueryHandler(t *testing.T) {
 	st := openQueryStore(t)
-	if code := postQuery(t, st, `{"sql":"select * from chapters where id = 7","time_ms":123.5,"environment":"production"}`); code != http.StatusAccepted {
+	if code := postQuery(t, st, `{"sql":"select * from chapters where id = 7","time_ms":123.5,"environment":"production","connection":"mysql"}`); code != http.StatusAccepted {
 		t.Fatalf("valid event must 202, got %d", code)
 	}
 	rows, err := st.QueryLeaderboard("backend", 24, 10)
-	if err != nil || len(rows) != 1 || rows[0].TotalMs != 123.5 {
+	if err != nil || len(rows) != 1 || rows[0].TotalMs != 123.5 || rows[0].Connection != "mysql" {
 		t.Fatalf("stored aggregate wrong: %+v %v", rows, err)
 	}
 	if code := postQuery(t, st, `{"sql":"","time_ms":5}`); code != http.StatusUnprocessableEntity {
