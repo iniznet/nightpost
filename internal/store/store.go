@@ -173,6 +173,12 @@ func migrate(db *sql.DB) error {
 	ingest_key TEXT NOT NULL DEFAULT '',
 	created_at INTEGER NOT NULL DEFAULT 0,
 	rotated_at INTEGER NOT NULL DEFAULT 0)`},
+		{"users", `CREATE TABLE IF NOT EXISTS users (
+	id INTEGER PRIMARY KEY,
+	email TEXT NOT NULL UNIQUE,
+	pw_hash TEXT NOT NULL,
+	created_at INTEGER NOT NULL DEFAULT 0,
+	sessions_valid_after INTEGER NOT NULL DEFAULT 0)`},
 	} {
 		if _, err := db.Exec(m.stmt); err != nil {
 			// Idempotent: only "already applied" failures may pass through.

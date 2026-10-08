@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"flag"
 	"log"
 	"net/http"
@@ -27,6 +28,8 @@ func main() {
 	occurrenceCap := flag.Int("occurrence-cap", 30, "max occurrence rows stored per issue fingerprint per minute (0 = unlimited)")
 	ingestRate := flag.Float64("ingest-rate", 50, "ingest events per second allowed per project before 429")
 	ingestBurst := flag.Float64("ingest-burst", 100, "ingest burst ceiling per project")
+	sessionSecret := flag.String("session-secret", "", "HMAC key for dashboard session cookies (empty = random per boot; sessions die on restart)")
+	resetAdmin := flag.String("reset-admin", "", "one-shot: reset (or create) this admin email's password, print a fresh one, and exit")
 	flag.Parse()
 
 	st, err := store.Open(*dbPath)
@@ -43,6 +46,24 @@ func main() {
 	mon := &ingest.Monolog{Store: st}
 	sh := ingest.NewShaper(*ingestRate, *ingestBurst)
 	gate := ingest.NewKeyGate(st, 5*time.Second)
+	if *resetAdmin != "" {
+		email := strings.ToLower(strings.TrimSpace(*resetAdmin))
+		pw, rerr := st.ResetAdminPassword(email)
+		if rerr != nil {
+			log.Fatalf("reset-admin: %v", rerr)
+		}
+		log.Printf("admin %q password reset (shown once): %s — restart without -reset-admin when done", email, pw)
+		return
+	}
+	secret := []byte(*sessionSecret)
+	if len(secret) == 0 {
+		secret = make([]byte, 32)
+		if _, err := rand.Read(secret); err != nil {
+			log.Fatalf("session secret entropy: %v", err)
+		}
+		log.Printf("WARNING: -session-secret unset; generated a per-boot key — dashboard sessions will not survive restarts")
+	}
+	auth := web.NewAuth(st, secret)
 	go func() {
 		if err := mon.ListenAndServe(*sockAddr); err != nil {
 			log.Printf("monolog socket stopped: %v", err)
@@ -68,7 +89,7 @@ func main() {
 	mux.HandleFunc("OPTIONS /ingest/{project}/error", ingest.PreflightHandler(*corsOrigin))
 	mux.HandleFunc("OPTIONS /ingest/{project}/profile", ingest.PreflightHandler(*corsOrigin))
 	mux.HandleFunc("GET /up", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	web.Register(mux, st, gate)
+	web.Register(mux, st, gate, auth)
 
 	srv := &http.Server{Addr: *httpAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 

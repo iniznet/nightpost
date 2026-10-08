@@ -170,6 +170,8 @@ const (
 	PageSlowest   Page = "slowest"
 	PageTrace     Page = "trace"
 	PageKeys      Page = "keys"
+	PageLogin     Page = "login"
+	PageSetup     Page = "setup"
 )
 
 var funcMap = template.FuncMap{
@@ -265,7 +267,7 @@ func parseID(s string) int64 {
 	return id
 }
 
-func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate) {
+func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *Auth) {
 	dashboardTmpl := mustLayout("dashboard.html")
 	issuesTmpl := mustLayout("index.html")
 	detailTmpl := mustLayout("detail.html")
@@ -276,7 +278,24 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate) {
 	traceTmpl := mustLayout("trace.html")
 	keysTmpl := mustLayout("keys.html")
 
-	mux.HandleFunc("GET /keys", func(w http.ResponseWriter, r *http.Request) {
+	// Pages mount on an inner mux so a single auth gate covers every route
+	// (including future ones) by construction; login/setup/logout and the
+	// open ingest routes stay on the outer mux. auth == nil keeps the
+	// dashboard open — the mode tests and pre-M4 dev runs use.
+	page := http.NewServeMux()
+	if auth != nil {
+		auth.CompileTemplates()
+		mux.HandleFunc("GET /login", auth.HandleLoginGET)
+		mux.HandleFunc("POST /login", auth.HandleLoginPOST)
+		mux.HandleFunc("GET /setup", auth.HandleSetupGET)
+		mux.HandleFunc("POST /setup", auth.HandleSetupPOST)
+		mux.HandleFunc("GET /logout", auth.HandleLogout)
+		mux.Handle("/", auth.Gate(page))
+	} else {
+		mux.Handle("/", page)
+	}
+
+	page.HandleFunc("GET /keys", func(w http.ResponseWriter, r *http.Request) {
 		data := baseData(st, r.URL.Query().Get("project"), PageKeys)
 		projects, err := st.ListProjects()
 		if err != nil {
@@ -289,7 +308,7 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate) {
 		}
 	})
 
-	mux.HandleFunc("POST /keys/rotate", func(w http.ResponseWriter, r *http.Request) {
+	page.HandleFunc("POST /keys/rotate", func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
 			http.Error(w, "malformed form", http.StatusBadRequest)
 			return
@@ -324,7 +343,7 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate) {
 	})
 
 
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+	page.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		project := r.URL.Query().Get("project")
 		data := baseData(st, project, PageDashboard)
 		summaries, err := st.DashboardSummaries(24)
@@ -377,7 +396,7 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate) {
 		}
 	})
 
-	mux.HandleFunc("GET /issues", func(w http.ResponseWriter, r *http.Request) {
+	page.HandleFunc("GET /issues", func(w http.ResponseWriter, r *http.Request) {
 		project := r.URL.Query().Get("project")
 		f := issueFilter{
 			Type:   r.URL.Query().Get("type"),
@@ -438,7 +457,7 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate) {
 		}
 	})
 
-	mux.HandleFunc("GET /issues/{id}", func(w http.ResponseWriter, r *http.Request) {
+	page.HandleFunc("GET /issues/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 		if err != nil {
 			http.Error(w, "bad id", http.StatusBadRequest)
@@ -462,10 +481,10 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate) {
 		}
 	})
 
-	mux.HandleFunc("POST /issues/{id}/resolve", resolveHandler(st, true))
-	mux.HandleFunc("POST /issues/{id}/reopen", resolveHandler(st, false))
+	page.HandleFunc("POST /issues/{id}/resolve", resolveHandler(st, true))
+	page.HandleFunc("POST /issues/{id}/reopen", resolveHandler(st, false))
 
-	mux.HandleFunc("GET /logs", func(w http.ResponseWriter, r *http.Request) {
+	page.HandleFunc("GET /logs", func(w http.ResponseWriter, r *http.Request) {
 		project := r.URL.Query().Get("project")
 		f := issueFilter{
 			Level:   r.URL.Query().Get("level"),
@@ -507,7 +526,7 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate) {
 		}
 	})
 
-	mux.HandleFunc("GET /profiles", func(w http.ResponseWriter, r *http.Request) {
+	page.HandleFunc("GET /profiles", func(w http.ResponseWriter, r *http.Request) {
 		project := r.URL.Query().Get("project")
 		typeFilter := r.URL.Query().Get("type")
 		view := r.URL.Query().Get("view")
@@ -557,7 +576,7 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate) {
 		}
 	})
 
-	mux.HandleFunc("GET /profiles/{id}", func(w http.ResponseWriter, r *http.Request) {
+	page.HandleFunc("GET /profiles/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 		if err != nil {
 			http.Error(w, "bad id", http.StatusBadRequest)
@@ -584,7 +603,7 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate) {
 		}
 	})
 
-	mux.HandleFunc("GET /traces/{id}", func(w http.ResponseWriter, r *http.Request) {
+	page.HandleFunc("GET /traces/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		legs, err := st.ProfilesByTrace(id, 20)
 		if err != nil {
@@ -603,7 +622,7 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate) {
 		}
 	})
 
-	mux.HandleFunc("GET /slowest", func(w http.ResponseWriter, r *http.Request) {
+	page.HandleFunc("GET /slowest", func(w http.ResponseWriter, r *http.Request) {
 		project := r.URL.Query().Get("project")
 		rows, err := st.SlowestCode(project, 500)
 		if err != nil {

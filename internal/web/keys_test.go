@@ -32,7 +32,7 @@ func TestKeysPageRotateFlow(t *testing.T) {
 	}
 	gate := ingest.NewKeyGate(st, time.Second)
 	mux := http.NewServeMux()
-	Register(mux, st, gate)
+	Register(mux, st, gate, nil)
 
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/keys", nil))
@@ -92,7 +92,7 @@ func TestKeysPageRotateFlow(t *testing.T) {
 func TestKeysRotateRejectsEmptyProject(t *testing.T) {
 	st := openKeysStore(t)
 	mux := http.NewServeMux()
-	Register(mux, st, nil)
+	Register(mux, st, nil, nil)
 	req := httptest.NewRequest(http.MethodPost, "/keys/rotate", strings.NewReader("project="))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	rec := httptest.NewRecorder()
