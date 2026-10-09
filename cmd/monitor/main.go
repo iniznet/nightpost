@@ -91,6 +91,8 @@ func main() {
 	mux.HandleFunc("POST /ingest/{project}/error", ingest.WithCORS(*corsOrigin, ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.PathProject, ingest.ErrorHandler(st)))))
 	mux.HandleFunc("POST /ingest/{project}/xhprof", ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.XHProfProject, ingest.XHProfHandler(st))))
 	mux.HandleFunc("POST /ingest/{project}/query", ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.PathProject, ingest.QueryHandler(st))))
+	mux.HandleFunc("POST /ingest/{project}/job", ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.PathProject, ingest.JobHandler(st))))
+	mux.HandleFunc("POST /ingest/{project}/release", ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.PathProject, ingest.ReleaseHandler(st))))
 	// Sentry SDK compatibility: sentry-laravel POSTs envelopes to /api/{id}/store.
 	mux.HandleFunc("POST /api/{project}/store", ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.PathProject, ingest.SentryHandler(st))))
 	mux.HandleFunc("POST /api/{project}/store/", ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.PathProject, ingest.SentryHandler(st))))

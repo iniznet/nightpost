@@ -75,4 +75,24 @@
 </tbody>
 </table>
 {{else}}<p class="empty">No slow queries captured — enable MONITOR_SLOW_QUERY_MS on the backend.</p>{{end}}
+<h2>Cron &amp; job health (24h{{if .All}} · all projects{{end}})</h2>
+{{if .Jobs}}
+<table>
+<thead><tr><th>Name</th><th>Kind</th><th>Last run</th><th>Status</th><th>Fails 24h</th><th>Avg</th></tr></thead>
+<tbody>
+{{range .Jobs}}<tr><td class="mono" title="{{.Name}}">{{trunc .Name 70}}</td><td class="dim">{{.Kind}}</td><td class="dim" title="{{.LastRunAt.Format "2006-01-02 15:04:05"}}">{{rel .LastRunAt}}</td><td><span class="badge lvl-{{if eq .LastStatus "ok"}}info{{else}}error{{end}}">{{.LastStatus}}</span></td><td class="num">{{if .Failures24h}}{{.Failures24h}}{{else}}—{{end}}</td><td class="num">{{ms .AvgMs}}</td></tr>{{end}}
+</tbody>
+</table>
+<a class="faint" href="/jobs?project={{.Project}}">Full job history →</a>
+{{else}}<p class="empty">No job telemetry — enable MONITOR_JOB_CAPTURE on the backend.</p>{{end}}
+<h2>Releases{{if .All}} · all projects{{end}}</h2>
+{{if .Releases}}
+<table>
+<thead><tr><th>Version</th><th>Env</th><th>Deployed</th><th>Errors</th><th>Sampled reqs</th><th>Crash-free</th></tr></thead>
+<tbody>
+{{range .Releases}}<tr><td class="mono" title="{{.Version}}">{{trunc .Version 40}}</td><td class="dim">{{or .Environment "—"}}</td><td class="dim" title="{{.At.Format "2006-01-02 15:04:05"}}">{{rel .At}}</td><td class="num">{{.Errors24h}}</td><td class="num">{{.SampledReqs24h}}</td><td class="num">{{.CrashFree}}</td></tr>{{end}}
+</tbody>
+</table>
+<p class="faint">Crash-free is a sampled estimate: request timings are sampled upstream while errors are full-volume — treat it as a conservative bound.</p>
+{{else}}<p class="empty">No release markers yet — POST /ingest/{project}/release from your CI.</p>{{end}}
 {{end}}

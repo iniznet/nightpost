@@ -100,6 +100,9 @@ func (s *Store) RunRetention(days int, keepProfiles int) (string, error) {
 	if _, err := s.PruneQueryStats(time.Now().AddDate(0, 0, -days).Unix(), 500); err != nil {
 		return "", err
 	}
+	if _, err := s.PruneJobStats(time.Now().AddDate(0, 0, -days).Unix(), 500); err != nil {
+		return "", err
+	}
 	if rows, err := s.wdb.Query(`PRAGMA wal_checkpoint(TRUNCATE)`); err == nil {
 		rows.Close()
 	}

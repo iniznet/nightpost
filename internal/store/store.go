@@ -200,6 +200,32 @@ func migrate(db *sql.DB) error {
 	last_seen_at INTEGER NOT NULL,
 	PRIMARY KEY(project_key, fingerprint))`},
 		{"idx_query_stats", `CREATE INDEX IF NOT EXISTS idx_query_stats ON query_stats(last_seen_at DESC)`},
+		{"job_stats", `CREATE TABLE IF NOT EXISTS job_stats (
+	project_key TEXT NOT NULL,
+	kind TEXT NOT NULL,
+	name TEXT NOT NULL,
+	queue TEXT NOT NULL DEFAULT '',
+	runs INTEGER NOT NULL DEFAULT 0,
+	failures INTEGER NOT NULL DEFAULT 0,
+	fail_window_start INTEGER NOT NULL DEFAULT 0,
+	failures_24h INTEGER NOT NULL DEFAULT 0,
+	seconds_sum REAL NOT NULL DEFAULT 0,
+	seconds_count INTEGER NOT NULL DEFAULT 0,
+	last_ok_at INTEGER NOT NULL DEFAULT 0,
+	last_run_at INTEGER NOT NULL DEFAULT 0,
+	last_seconds REAL NOT NULL DEFAULT 0,
+	last_status TEXT NOT NULL DEFAULT '',
+	PRIMARY KEY(project_key, kind, name))`},
+		{"idx_job_stats_run", `CREATE INDEX IF NOT EXISTS idx_job_stats_run ON job_stats(last_run_at DESC)`},
+		{"releases", `CREATE TABLE IF NOT EXISTS releases (
+	id INTEGER PRIMARY KEY,
+	project_key TEXT NOT NULL,
+	version TEXT NOT NULL,
+	environment TEXT,
+	released_at INTEGER NOT NULL)`},
+		{"idx_releases", `CREATE INDEX IF NOT EXISTS idx_releases ON releases(project_key, released_at DESC)`},
+		{"occ_user_id", `ALTER TABLE occurrences ADD COLUMN user_id TEXT NOT NULL DEFAULT ''`},
+		{"idx_occ_user", `CREATE INDEX IF NOT EXISTS idx_occ_user ON occurrences(issue_id, user_id)`},
 	} {
 		if _, err := db.Exec(m.stmt); err != nil {
 			// Idempotent: only "already applied" failures may pass through.
@@ -286,8 +312,8 @@ func (s *Store) insertOccurrence(issueID int64, kind string, payload any, now in
 			raw = string(b)
 		}
 	}
-	_, err := s.wdb.Exec(`INSERT INTO occurrences (issue_id, type, payload, seen_at) VALUES (?, ?, ?, ?)`,
-		issueID, kind, truncate(raw, 32<<10), now)
+	_, err := s.wdb.Exec(`INSERT INTO occurrences (issue_id, type, payload, seen_at, user_id) VALUES (?, ?, ?, ?, ?)`,
+		issueID, kind, truncate(raw, 32<<10), now, extractUserID(payload))
 	if err != nil {
 		return fmt.Errorf("insert occurrence: %w", err)
 	}
@@ -301,6 +327,7 @@ func (s *Store) insertOccurrence(issueID int64, kind string, payload any, now in
 // matching keyset cursor for "older than" pagination.
 type IssueQuery struct {
 	Project, Type, Level, Env, Channel, Status, Q string
+	SinceFirstSeen                                int64
 	Sort                                          string
 	BeforeID                                      int64
 	BeforeCount                                   int64
@@ -328,6 +355,7 @@ func (s *Store) Issues(q IssueQuery) ([]Issue, error) {
 		q.Channel, q.Channel,
 		q.Q, q.Q,
 		q.Status,
+		q.SinceFirstSeen, q.SinceFirstSeen,
 	}
 	args = append(args, cursorArgs...)
 	args = append(args, limit)
@@ -340,6 +368,7 @@ func (s *Store) Issues(q IssueQuery) ([]Issue, error) {
 		  AND (? = '' OR channel = ?)
 		  AND (? = '' OR title LIKE '%' || ? || '%')
 		  AND (CASE ? WHEN 'open' THEN resolved = 0 WHEN 'resolved' THEN resolved = 1 ELSE 1 END)
+		  AND (? <= 0 OR first_seen_at >= ?)
 	`+cursor+`
 		`+order+` LIMIT ?`,
 		args...)

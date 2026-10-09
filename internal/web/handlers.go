@@ -6,8 +6,8 @@ import (
 	"html/template"
 	"log"
 	"net/http"
-	"regexp"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -23,6 +23,7 @@ type Page string
 
 type issueFilter struct {
 	Type, Level, Env, Channel, Status, Q string
+	NewSince                             string
 	Sort                                 string
 }
 
@@ -171,6 +172,7 @@ const (
 	PageTrace     Page = "trace"
 	PageKeys      Page = "keys"
 	PageQueries   Page = "queries"
+	PageJobs      Page = "jobs"
 	PageLogin     Page = "login"
 	PageSetup     Page = "setup"
 )
@@ -286,6 +288,7 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *A
 	traceTmpl := mustLayout("trace.html")
 	keysTmpl := mustLayout("keys.html")
 	queriesTmpl := mustLayout("queries.html")
+	jobsTmpl := mustLayout("jobs.html")
 
 	// Pages mount on an inner mux so a single auth gate covers every route
 	// (including future ones) by construction; login/setup/logout and the
@@ -358,7 +361,6 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *A
 		}
 	})
 
-
 	page.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		project := r.URL.Query().Get("project")
 		data := baseData(st, project, PageDashboard)
@@ -410,6 +412,12 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *A
 		if top, qerr := st.QueryLeaderboard(project, 24, 5); qerr == nil && len(top) > 0 {
 			data["TopQueries"] = top
 		}
+		if jobs, jerr := st.JobLeaderboard(project, 24, 5); jerr == nil {
+			data["Jobs"] = jobs
+		}
+		if rels, rerr := st.ReleasesWithHealth(project, 5); rerr == nil {
+			data["Releases"] = rels
+		}
 		if err := dashboardTmpl.ExecuteTemplate(w, "layout", data); err != nil {
 			log.Printf("render dashboard: %v", err)
 		}
@@ -418,11 +426,12 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *A
 	page.HandleFunc("GET /issues", func(w http.ResponseWriter, r *http.Request) {
 		project := r.URL.Query().Get("project")
 		f := issueFilter{
-			Type:   r.URL.Query().Get("type"),
-			Level:  r.URL.Query().Get("level"),
-			Env:    r.URL.Query().Get("env"),
-			Status: r.URL.Query().Get("status"),
-			Q:      r.URL.Query().Get("q"),
+			Type:     r.URL.Query().Get("type"),
+			Level:    r.URL.Query().Get("level"),
+			Env:      r.URL.Query().Get("env"),
+			Status:   r.URL.Query().Get("status"),
+			Q:        r.URL.Query().Get("q"),
+			NewSince: r.URL.Query().Get("new_since"),
 		}
 		if f.Status == "" {
 			f.Status = "open"
@@ -433,14 +442,22 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *A
 		if f.Sort != "recent" {
 			f.Sort = "pain"
 		}
-		issues, err := st.Issues(store.IssueQuery{
+		var newSince *store.ReleaseMark
+		if f.NewSince == "release" {
+			newSince, _ = st.LatestRelease(project, f.Env)
+		}
+		q := store.IssueQuery{
 			Project: project, Type: f.Type, Level: f.Level, Env: f.Env, Q: f.Q,
 			Status:      f.Status,
 			Sort:        f.Sort,
 			BeforeID:    parseID(r.URL.Query().Get("before")),
 			BeforeCount: parseID(r.URL.Query().Get("beforecount")),
 			Limit:       50,
-		})
+		}
+		if newSince != nil {
+			q.SinceFirstSeen = newSince.At.Unix()
+		}
+		issues, err := st.Issues(q)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -458,6 +475,13 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *A
 		data["Spark"] = spark
 		data["Filter"] = f
 		data["Envs"] = envs
+		data["NewSince"] = newSince
+		ids := make([]int64, 0, len(shown))
+		for _, is := range shown {
+			ids = append(ids, is.ID)
+		}
+		userCounts, _ := st.UserCounts(ids)
+		data["UserCounts"] = userCounts
 		if len(issues) == 50 {
 			v := url.Values{}
 			v.Set("project", project)
@@ -467,6 +491,7 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *A
 			v.Set("status", f.Status)
 			v.Set("q", f.Q)
 			v.Set("sort", f.Sort)
+			v.Set("new_since", f.NewSince)
 			v.Set("before", strconv.FormatInt(issues[len(issues)-1].ID, 10))
 			v.Set("beforecount", strconv.FormatInt(issues[len(issues)-1].Count, 10))
 			data["NextURL"] = "/issues?" + v.Encode()
@@ -494,6 +519,11 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *A
 		}
 		data := baseData(st, issue.ProjectKey, PageIssues)
 		data["Issue"] = issue
+		if mark, merr := st.LatestRelease(issue.ProjectKey, issue.Environment); merr == nil && mark != nil && issue.FirstSeenAt.After(mark.At) {
+			data["NewSince"] = mark
+		}
+		uc, _ := st.UserCounts([]int64{issue.ID})
+		data["ImpactedUsers"] = uc[issue.ID]
 		data["Views"] = buildOccViews(occurrences)
 		if err := detailTmpl.ExecuteTemplate(w, "layout", data); err != nil {
 			log.Printf("render detail: %v", err)
@@ -638,6 +668,20 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *A
 		data["TraceID"] = id
 		if err := traceTmpl.ExecuteTemplate(w, "layout", data); err != nil {
 			log.Printf("render trace: %v", err)
+		}
+	})
+
+	page.HandleFunc("GET /jobs", func(w http.ResponseWriter, r *http.Request) {
+		project := r.URL.Query().Get("project")
+		data := baseData(st, project, PageJobs)
+		aggs, err := st.JobLeaderboard(project, 24*7, 200)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		data["Rows"] = aggs
+		if err := jobsTmpl.ExecuteTemplate(w, "layout", data); err != nil {
+			log.Printf("render jobs: %v", err)
 		}
 	})
 

@@ -10,10 +10,10 @@ import (
 // Config is the -alerts-config JSON document, hot-reloaded on mtime change.
 // No alert-configuration UI in M4: the file is the product surface (#157).
 type Config struct {
-	BaseURL   string    `json:"base_url"`
-	TickSecs  int       `json:"tick_seconds"`
-	Channels  []Channel `json:"channels"`
-	Rules     []Rule    `json:"rules"`
+	BaseURL  string    `json:"base_url"`
+	TickSecs int       `json:"tick_seconds"`
+	Channels []Channel `json:"channels"`
+	Rules    []Rule    `json:"rules"`
 }
 
 type Channel struct {
@@ -31,16 +31,19 @@ type Channel struct {
 }
 
 type Rule struct {
-	Type            string   `json:"type"` // new-issue | regression | count-window | p95-latency
+	Type            string   `json:"type"` // new-issue | regression | count-window | p95-latency | heartbeat
 	Projects        []string `json:"projects"`
 	Channels        []string `json:"channels"`
 	WindowMinutes   int      `json:"window_minutes"`
-	Threshold       int64    `json:"threshold"`     // count-window: occurrences
-	ThresholdMs     float64  `json:"threshold_ms"`  // p95-latency
+	Threshold       int64    `json:"threshold"`    // count-window: occurrences
+	ThresholdMs     float64  `json:"threshold_ms"` // p95-latency
 	CooldownMinutes int      `json:"cooldown_minutes"`
+	Command         string   `json:"command"`          // heartbeat: command signature
+	CadenceSeconds  int64    `json:"cadence_seconds"`  // heartbeat: expected period
+	GraceMultiplier float64  `json:"grace_multiplier"` // heartbeat: alert after cadence x this (default 2)
 }
 
-var ruleTypes = map[string]bool{"new-issue": true, "regression": true, "count-window": true, "p95-latency": true}
+var ruleTypes = map[string]bool{"new-issue": true, "regression": true, "count-window": true, "p95-latency": true, "heartbeat": true}
 
 func LoadConfig(path string) (*Config, error) {
 	raw, err := os.ReadFile(path)
@@ -102,6 +105,10 @@ func (c *Config) validate() error {
 		case "p95-latency":
 			if r.ThresholdMs <= 0 {
 				return fmt.Errorf("alerts config: rule %d: threshold_ms must be positive", i)
+			}
+		case "heartbeat":
+			if r.Command == "" || r.CadenceSeconds <= 0 || len(r.Projects) == 0 {
+				return fmt.Errorf("alerts config: rule %d: heartbeat needs command, cadence_seconds and projects", i)
 			}
 		}
 	}
