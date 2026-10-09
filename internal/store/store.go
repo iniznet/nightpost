@@ -147,7 +147,14 @@ CREATE INDEX IF NOT EXISTS idx_occurrences_issue ON occurrences(issue_id, seen_a
 		rdb.Close()
 		return nil, err
 	}
-	return &Store{wdb: wdb, rdb: rdb, limWindows: map[string]*limWindow{}, MaxOccPerMin: 30}, nil
+	s := &Store{wdb: wdb, rdb: rdb, limWindows: map[string]*limWindow{}, MaxOccPerMin: 30}
+	// Auto-provision the projects table from existing event rows so upgraded
+	// volumes carry their producers as unsigned legacy projects (#157).
+	if err := s.ProvisionProjects(); err != nil {
+		s.Close()
+		return nil, fmt.Errorf("provision projects: %w", err)
+	}
+	return s, nil
 }
 
 // migrate applies additive migrations idempotently: pre-channel databases
@@ -161,6 +168,38 @@ func migrate(db *sql.DB) error {
 		{"profiles.trace_id", `ALTER TABLE profiles ADD COLUMN trace_id TEXT NOT NULL DEFAULT ''`},
 		{"idx_profiles_trace", `CREATE INDEX IF NOT EXISTS idx_profiles_trace ON profiles(trace_id, created_at DESC)`},
 		{"profiles.tree", `ALTER TABLE profiles ADD COLUMN tree TEXT`},
+		{"projects", `CREATE TABLE IF NOT EXISTS projects (
+	key TEXT PRIMARY KEY,
+	ingest_key TEXT NOT NULL DEFAULT '',
+	created_at INTEGER NOT NULL DEFAULT 0,
+	rotated_at INTEGER NOT NULL DEFAULT 0)`},
+		{"users", `CREATE TABLE IF NOT EXISTS users (
+	id INTEGER PRIMARY KEY,
+	email TEXT NOT NULL UNIQUE,
+	pw_hash TEXT NOT NULL,
+	created_at INTEGER NOT NULL DEFAULT 0,
+	sessions_valid_after INTEGER NOT NULL DEFAULT 0)`},
+		{"issues.resolved_at", `ALTER TABLE issues ADD COLUMN resolved_at INTEGER NOT NULL DEFAULT 0`},
+		{"alerts_log", `CREATE TABLE IF NOT EXISTS alerts_log (
+	id INTEGER PRIMARY KEY,
+	channel TEXT NOT NULL,
+	rule TEXT NOT NULL,
+	target_key TEXT NOT NULL,
+	sent_at INTEGER NOT NULL)`},
+		{"idx_alerts_target", `CREATE INDEX IF NOT EXISTS idx_alerts_target ON alerts_log(rule, target_key, sent_at DESC)`},
+		{"idx_alerts_channel", `CREATE INDEX IF NOT EXISTS idx_alerts_channel ON alerts_log(channel, sent_at DESC)`},
+		{"query_stats", `CREATE TABLE IF NOT EXISTS query_stats (
+	project_key TEXT NOT NULL,
+	fingerprint TEXT NOT NULL,
+	sql TEXT NOT NULL,
+	connection TEXT NOT NULL DEFAULT '',
+	count INTEGER NOT NULL DEFAULT 1,
+	total_ms REAL NOT NULL DEFAULT 0,
+	max_ms REAL NOT NULL DEFAULT 0,
+	first_seen_at INTEGER NOT NULL,
+	last_seen_at INTEGER NOT NULL,
+	PRIMARY KEY(project_key, fingerprint))`},
+		{"idx_query_stats", `CREATE INDEX IF NOT EXISTS idx_query_stats ON query_stats(last_seen_at DESC)`},
 	} {
 		if _, err := db.Exec(m.stmt); err != nil {
 			// Idempotent: only "already applied" failures may pass through.
@@ -408,8 +447,20 @@ func (s *Store) Occurrences(issueID int64, limit int) ([]map[string]any, error) 
 	return out, rows.Err()
 }
 
+// SetResolvedAt resolves an issue with an explicit resolution stamp —
+// the regression rule compares last_seen_at > resolved_at, and tooling
+// (plus tests) needs deterministic control over that boundary.
+func (s *Store) SetResolvedAt(id int64, at int64) error {
+	_, err := s.wdb.Exec(`UPDATE issues SET resolved = 1, resolved_at = ? WHERE id = ?`, at, id)
+	return err
+}
+
 func (s *Store) SetResolved(id int64, resolved bool) error {
-	_, err := s.wdb.Exec(`UPDATE issues SET resolved = ? WHERE id = ?`, resolved, id)
+	stamp := 0
+	if resolved {
+		stamp = 1
+	}
+	_, err := s.wdb.Exec(`UPDATE issues SET resolved = ?, resolved_at = CASE WHEN ? = 1 THEN CAST(strftime('%s','now') AS INTEGER) ELSE 0 END WHERE id = ?`, resolved, stamp, id)
 	return err
 }
 

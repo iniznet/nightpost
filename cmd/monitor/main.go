@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"flag"
 	"log"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/iniznet/fenrirealm-monitor/internal/alerts"
 	"github.com/iniznet/fenrirealm-monitor/internal/ingest"
 	"github.com/iniznet/fenrirealm-monitor/internal/store"
 	"github.com/iniznet/fenrirealm-monitor/internal/web"
@@ -27,6 +29,9 @@ func main() {
 	occurrenceCap := flag.Int("occurrence-cap", 30, "max occurrence rows stored per issue fingerprint per minute (0 = unlimited)")
 	ingestRate := flag.Float64("ingest-rate", 50, "ingest events per second allowed per project before 429")
 	ingestBurst := flag.Float64("ingest-burst", 100, "ingest burst ceiling per project")
+	sessionSecret := flag.String("session-secret", "", "HMAC key for dashboard session cookies (empty = random per boot; sessions die on restart)")
+	resetAdmin := flag.String("reset-admin", "", "one-shot: reset (or create) this admin email's password, print a fresh one, and exit")
+	alertsConfig := flag.String("alerts-config", "", "path to alerts JSON (channels + rules); empty = alerting disabled")
 	flag.Parse()
 
 	st, err := store.Open(*dbPath)
@@ -36,9 +41,42 @@ func main() {
 	defer st.Close()
 	st.MaxOccPerMin = *occurrenceCap
 	logDBGuard(*dbPath)
+	if n, uerr := st.UnsignedProjectCount(); uerr == nil && n > 0 {
+		log.Printf("WARNING: %d project(s) accept unsigned ingest (no key) — rotate keys at /keys; the unsigned path is deprecated (#157)", n)
+	}
 
 	mon := &ingest.Monolog{Store: st}
 	sh := ingest.NewShaper(*ingestRate, *ingestBurst)
+	gate := ingest.NewKeyGate(st, 5*time.Second)
+	if *resetAdmin != "" {
+		email := strings.ToLower(strings.TrimSpace(*resetAdmin))
+		pw, rerr := st.ResetAdminPassword(email)
+		if rerr != nil {
+			log.Fatalf("reset-admin: %v", rerr)
+		}
+		log.Printf("admin %q password reset (shown once): %s — restart without -reset-admin when done", email, pw)
+		return
+	}
+	secret := []byte(*sessionSecret)
+	if len(secret) == 0 {
+		secret = make([]byte, 32)
+		if _, err := rand.Read(secret); err != nil {
+			log.Fatalf("session secret entropy: %v", err)
+		}
+		log.Printf("WARNING: -session-secret unset; generated a per-boot key — dashboard sessions will not survive restarts")
+	}
+	if *alertsConfig != "" {
+		acfg, aerr := alerts.LoadConfig(*alertsConfig)
+		if aerr != nil {
+			log.Fatalf("alerts config: %v", aerr)
+		}
+		disp := alerts.NewDispatcher(st, acfg, *alertsConfig)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		go disp.Run(ctx)
+		log.Printf("alerts: dispatcher armed (%d channels, %d rules)", len(acfg.Channels), len(acfg.Rules))
+	}
+	auth := web.NewAuth(st, secret)
 	go func() {
 		if err := mon.ListenAndServe(*sockAddr); err != nil {
 			log.Printf("monolog socket stopped: %v", err)
@@ -48,23 +86,24 @@ func main() {
 	go retentionLoop(st, *retentionDays, *pruneInterval)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /ingest/{project}/sentry", ingest.WithShaper(sh, ingest.SentryHandler(st)))
-	mux.HandleFunc("POST /ingest/{project}/profile", ingest.WithCORS(*corsOrigin, ingest.WithShaper(sh, ingest.ProfileHandler(st))))
-	mux.HandleFunc("POST /ingest/{project}/error", ingest.WithCORS(*corsOrigin, ingest.WithShaper(sh, ingest.ErrorHandler(st))))
-	mux.HandleFunc("POST /ingest/{project}/xhprof", ingest.WithShaper(sh, ingest.XHProfHandler(st)))
+	mux.HandleFunc("POST /ingest/{project}/sentry", ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.PathProject, ingest.SentryHandler(st))))
+	mux.HandleFunc("POST /ingest/{project}/profile", ingest.WithCORS(*corsOrigin, ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.PathProject, ingest.ProfileHandler(st)))))
+	mux.HandleFunc("POST /ingest/{project}/error", ingest.WithCORS(*corsOrigin, ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.PathProject, ingest.ErrorHandler(st)))))
+	mux.HandleFunc("POST /ingest/{project}/xhprof", ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.XHProfProject, ingest.XHProfHandler(st))))
+	mux.HandleFunc("POST /ingest/{project}/query", ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.PathProject, ingest.QueryHandler(st))))
 	// Sentry SDK compatibility: sentry-laravel POSTs envelopes to /api/{id}/store.
-	mux.HandleFunc("POST /api/{project}/store", ingest.WithShaper(sh, ingest.SentryHandler(st)))
-	mux.HandleFunc("POST /api/{project}/store/", ingest.WithShaper(sh, ingest.SentryHandler(st)))
-	mux.HandleFunc("POST /api/{project}/envelope", ingest.WithShaper(sh, ingest.SentryHandler(st)))
+	mux.HandleFunc("POST /api/{project}/store", ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.PathProject, ingest.SentryHandler(st))))
+	mux.HandleFunc("POST /api/{project}/store/", ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.PathProject, ingest.SentryHandler(st))))
+	mux.HandleFunc("POST /api/{project}/envelope", ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.PathProject, ingest.SentryHandler(st))))
 	// spiral-packages/profiler compatibility: PROFILER_ENDPOINT posts here
 	// (project key = HTTP Basic username, e.g. http://backend@monitor:8000/...).
-	mux.HandleFunc("POST /api/profiler/store", ingest.WithShaper(sh, ingest.XHProfHandler(st)))
-	mux.HandleFunc("POST /api/{project}/profiler/store", ingest.WithShaper(sh, ingest.XHProfHandler(st)))
+	mux.HandleFunc("POST /api/profiler/store", ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.XHProfProject, ingest.XHProfHandler(st))))
+	mux.HandleFunc("POST /api/{project}/profiler/store", ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.XHProfProject, ingest.XHProfHandler(st))))
 	// Browser preflight for the first-party reporter endpoints.
 	mux.HandleFunc("OPTIONS /ingest/{project}/error", ingest.PreflightHandler(*corsOrigin))
 	mux.HandleFunc("OPTIONS /ingest/{project}/profile", ingest.PreflightHandler(*corsOrigin))
 	mux.HandleFunc("GET /up", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	web.Register(mux, st)
+	web.Register(mux, st, gate, auth)
 
 	srv := &http.Server{Addr: *httpAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 

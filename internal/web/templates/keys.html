@@ -1,0 +1,28 @@
+{{define "title"}}Ingest keys — fenrirealm-monitor{{end}}
+{{define "content"}}
+<h1>Ingest keys</h1>
+<p class="faint">Per-project bearer keys for every ingest route. A project without a key still accepts unsigned (legacy) traffic; rotating takes effect immediately — update the producer env in the same window.</p>
+{{if .NewKey}}
+<div class="flash">New key for <b class="mono">{{.NewKeyProject}}</b>: <code class="mono">{{.NewKey}}</code> — copy it now, it is shown once.</div>
+{{end}}
+{{if .ProjectRows}}
+<table>
+<thead><tr><th>Project</th><th>Ingest key</th><th>Rotated</th><th></th></tr></thead>
+<tbody>
+{{range .ProjectRows}}
+<tr>
+  <td class="mono">{{.Key}}</td>
+  <td>{{if .HasKey}}<span class="pill">set</span>{{else}}<span class="dim">unsigned (legacy)</span>{{end}}</td>
+  <td class="dim">{{if .RotatedAt.IsZero}}—{{else}}{{rel .RotatedAt}}{{end}}</td>
+  <td class="actions">
+    <form method="post" action="/keys/rotate">
+      <input type="hidden" name="project" value="{{.Key}}">
+      <button type="submit">{{if .HasKey}}Rotate{{else}}Issue key{{end}}</button>
+    </form>
+  </td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{else}}<p class="empty">No projects yet — they are provisioned automatically from ingest traffic.</p>{{end}}
+{{end}}

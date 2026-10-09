@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/iniznet/fenrirealm-monitor/internal/ingest"
 	"github.com/iniznet/fenrirealm-monitor/internal/store"
 )
 
@@ -168,6 +169,10 @@ const (
 	PageProfiles  Page = "profiles"
 	PageSlowest   Page = "slowest"
 	PageTrace     Page = "trace"
+	PageKeys      Page = "keys"
+	PageQueries   Page = "queries"
+	PageLogin     Page = "login"
+	PageSetup     Page = "setup"
 )
 
 var funcMap = template.FuncMap{
@@ -177,6 +182,13 @@ var funcMap = template.FuncMap{
 	"mb":    fmtMB,
 	"fn":    prettifyFn,
 	"pct":   func(v, max float64) string { return strconv.FormatFloat(pctOf(v, max), 'f', 1, 64) },
+	"trunc": func(s string, n int) string {
+		r := []rune(s)
+		if len(r) <= n {
+			return s
+		}
+		return string(r[:n]) + "…"
+	},
 	"pcti": func(v, max int64) string {
 		if max <= 0 {
 			return "0.0"
@@ -263,7 +275,7 @@ func parseID(s string) int64 {
 	return id
 }
 
-func Register(mux *http.ServeMux, st *store.Store) {
+func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *Auth) {
 	dashboardTmpl := mustLayout("dashboard.html")
 	issuesTmpl := mustLayout("index.html")
 	detailTmpl := mustLayout("detail.html")
@@ -272,8 +284,82 @@ func Register(mux *http.ServeMux, st *store.Store) {
 	profileTmpl := mustLayout("profile.html")
 	slowestTmpl := mustLayout("slowest.html")
 	traceTmpl := mustLayout("trace.html")
+	keysTmpl := mustLayout("keys.html")
+	queriesTmpl := mustLayout("queries.html")
 
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+	// Pages mount on an inner mux so a single auth gate covers every route
+	// (including future ones) by construction; login/setup/logout and the
+	// open ingest routes stay on the outer mux. auth == nil keeps the
+	// dashboard open — the mode tests and pre-M4 dev runs use.
+	page := http.NewServeMux()
+	if auth != nil {
+		auth.CompileTemplates()
+		mux.HandleFunc("GET /login", auth.HandleLoginGET)
+		mux.HandleFunc("POST /login", auth.HandleLoginPOST)
+		mux.HandleFunc("GET /setup", auth.HandleSetupGET)
+		mux.HandleFunc("POST /setup", auth.HandleSetupPOST)
+		mux.HandleFunc("GET /logout", auth.HandleLogout)
+		mux.Handle("/", auth.Gate(page))
+	} else {
+		mux.Handle("/", page)
+	}
+
+	page.HandleFunc("GET /keys", func(w http.ResponseWriter, r *http.Request) {
+		data := baseData(st, r.URL.Query().Get("project"), PageKeys)
+		projects, err := st.ListProjects()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		data["ProjectRows"] = projects
+		if err := keysTmpl.ExecuteTemplate(w, "layout", data); err != nil {
+			log.Printf("render keys: %v", err)
+		}
+	})
+
+	page.HandleFunc("POST /keys/rotate", func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "malformed form", http.StatusBadRequest)
+			return
+		}
+		if origin := r.Header.Get("Origin"); origin != "" {
+			u, uerr := url.Parse(origin)
+			if uerr != nil || !strings.EqualFold(u.Host, r.Host) {
+				http.Error(w, "cross-origin rotate rejected", http.StatusForbidden)
+				return
+			}
+		}
+		project := strings.TrimSpace(r.FormValue("project"))
+		if project == "" {
+			http.Error(w, "project required", http.StatusBadRequest)
+			return
+		}
+		secret, err := st.RotateIngestKey(project)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if gate != nil {
+			gate.Invalidate(project)
+		}
+		log.Printf("ingest key rotated for project %q", project)
+		data := baseData(st, project, PageKeys)
+		projects, perr := st.ListProjects()
+		if perr != nil {
+			http.Error(w, perr.Error(), http.StatusInternalServerError)
+			return
+		}
+		data["ProjectRows"] = projects
+		data["NewKey"] = secret
+		data["NewKeyProject"] = project
+		w.Header().Set("Cache-Control", "no-store")
+		if err := keysTmpl.ExecuteTemplate(w, "layout", data); err != nil {
+			log.Printf("render keys: %v", err)
+		}
+	})
+
+
+	page.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		project := r.URL.Query().Get("project")
 		data := baseData(st, project, PageDashboard)
 		summaries, err := st.DashboardSummaries(24)
@@ -321,12 +407,15 @@ func Register(mux *http.ServeMux, st *store.Store) {
 		if stats, serr := st.Stats(); serr == nil {
 			data["StoreStats"] = stats
 		}
+		if top, qerr := st.QueryLeaderboard(project, 24, 5); qerr == nil && len(top) > 0 {
+			data["TopQueries"] = top
+		}
 		if err := dashboardTmpl.ExecuteTemplate(w, "layout", data); err != nil {
 			log.Printf("render dashboard: %v", err)
 		}
 	})
 
-	mux.HandleFunc("GET /issues", func(w http.ResponseWriter, r *http.Request) {
+	page.HandleFunc("GET /issues", func(w http.ResponseWriter, r *http.Request) {
 		project := r.URL.Query().Get("project")
 		f := issueFilter{
 			Type:   r.URL.Query().Get("type"),
@@ -387,7 +476,7 @@ func Register(mux *http.ServeMux, st *store.Store) {
 		}
 	})
 
-	mux.HandleFunc("GET /issues/{id}", func(w http.ResponseWriter, r *http.Request) {
+	page.HandleFunc("GET /issues/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 		if err != nil {
 			http.Error(w, "bad id", http.StatusBadRequest)
@@ -411,10 +500,10 @@ func Register(mux *http.ServeMux, st *store.Store) {
 		}
 	})
 
-	mux.HandleFunc("POST /issues/{id}/resolve", resolveHandler(st, true))
-	mux.HandleFunc("POST /issues/{id}/reopen", resolveHandler(st, false))
+	page.HandleFunc("POST /issues/{id}/resolve", resolveHandler(st, true))
+	page.HandleFunc("POST /issues/{id}/reopen", resolveHandler(st, false))
 
-	mux.HandleFunc("GET /logs", func(w http.ResponseWriter, r *http.Request) {
+	page.HandleFunc("GET /logs", func(w http.ResponseWriter, r *http.Request) {
 		project := r.URL.Query().Get("project")
 		f := issueFilter{
 			Level:   r.URL.Query().Get("level"),
@@ -456,7 +545,7 @@ func Register(mux *http.ServeMux, st *store.Store) {
 		}
 	})
 
-	mux.HandleFunc("GET /profiles", func(w http.ResponseWriter, r *http.Request) {
+	page.HandleFunc("GET /profiles", func(w http.ResponseWriter, r *http.Request) {
 		project := r.URL.Query().Get("project")
 		typeFilter := r.URL.Query().Get("type")
 		view := r.URL.Query().Get("view")
@@ -506,7 +595,7 @@ func Register(mux *http.ServeMux, st *store.Store) {
 		}
 	})
 
-	mux.HandleFunc("GET /profiles/{id}", func(w http.ResponseWriter, r *http.Request) {
+	page.HandleFunc("GET /profiles/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 		if err != nil {
 			http.Error(w, "bad id", http.StatusBadRequest)
@@ -533,7 +622,7 @@ func Register(mux *http.ServeMux, st *store.Store) {
 		}
 	})
 
-	mux.HandleFunc("GET /traces/{id}", func(w http.ResponseWriter, r *http.Request) {
+	page.HandleFunc("GET /traces/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		legs, err := st.ProfilesByTrace(id, 20)
 		if err != nil {
@@ -552,7 +641,42 @@ func Register(mux *http.ServeMux, st *store.Store) {
 		}
 	})
 
-	mux.HandleFunc("GET /slowest", func(w http.ResponseWriter, r *http.Request) {
+	page.HandleFunc("GET /queries", func(w http.ResponseWriter, r *http.Request) {
+		project := r.URL.Query().Get("project")
+		data := baseData(st, project, PageQueries)
+		aggs, err := st.QueryLeaderboard(project, 24, 50)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		type QueryRow struct {
+			SQL, Fingerprint string
+			Connection       string
+			Count            int64
+			TotalMs, AvgMs   float64
+			MaxMs            float64
+			LastSeen         time.Time
+		}
+		rows := make([]QueryRow, 0, len(aggs))
+		var maxTotal float64
+		for _, a := range aggs {
+			if a.TotalMs > maxTotal {
+				maxTotal = a.TotalMs
+			}
+			avg := 0.0
+			if a.Count > 0 {
+				avg = a.TotalMs / float64(a.Count)
+			}
+			rows = append(rows, QueryRow{SQL: a.SQL, Fingerprint: a.Fingerprint, Connection: a.Connection, Count: a.Count, TotalMs: a.TotalMs, AvgMs: avg, MaxMs: a.MaxMs, LastSeen: a.LastSeen})
+		}
+		data["Rows"] = rows
+		data["MaxTotal"] = maxTotal
+		if err := queriesTmpl.ExecuteTemplate(w, "layout", data); err != nil {
+			log.Printf("render queries: %v", err)
+		}
+	})
+
+	page.HandleFunc("GET /slowest", func(w http.ResponseWriter, r *http.Request) {
 		project := r.URL.Query().Get("project")
 		rows, err := st.SlowestCode(project, 500)
 		if err != nil {
