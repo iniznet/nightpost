@@ -110,6 +110,12 @@ func TestForQueryStable(t *testing.T) {
 	if ForQuery("select 1") == ForQuery("update t set x=1") {
 		t.Fatal("distinct statements must not collide")
 	}
+	if ForQuery("select * from orders_2024") == ForQuery("select * from orders_2025") {
+		t.Fatal("year-suffixed tables are distinct statements; numRe must not glue them")
+	}
+	if ForQuery("where id = 5") != ForQuery("where id = 6") {
+		t.Fatal("standalone numeric literals must collapse")
+	}
 	if ForQuery("where id = ?") != ForQuery("where id = ?") {
 		t.Fatal("placeholder sql must be stable")
 	}

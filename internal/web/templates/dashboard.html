@@ -58,15 +58,6 @@
 </tbody>
 </table>
 {{else}}<p class="empty">No sampled requests in the window.</p>{{end}}
-<h2>Slowest queries (24h)</h2>
-{{if .TopQueries}}
-<table>
-<thead><tr><th>SQL</th><th>Total</th><th>Count</th><th>Max</th></tr></thead>
-<tbody>
-{{range .TopQueries}}<tr><td class="mono" title="{{.SQL}}">{{trunc .SQL 90}}</td><td class="num">{{ms .TotalMs}}</td><td class="num">{{.Count}}</td><td class="num">{{ms .MaxMs}}</td></tr>{{end}}
-</tbody>
-</table>
-{{else}}<p class="empty">No slow queries captured — enable MONITOR_SLOW_QUERY_MS on the backend.</p>{{end}}
 <h2>Log volume by level</h2>
 {{if .Summary.LogLevels}}
 {{range .Summary.LogLevels}}
@@ -75,4 +66,13 @@
 {{else}}<p class="empty">No log events.</p>{{end}}
 {{with .StoreStats}}<p class="faint">store: {{.Occurrences}} occurrences · {{.Profiles}} profiles · {{mb .DBBytes}} · {{.DroppedOccurrences}} dropped by ingest cap</p>{{end}}
 {{end}}
+<h2>Slowest queries (24h{{if .All}} · all projects{{end}})</h2>
+{{if .TopQueries}}
+<table>
+<thead><tr><th>SQL</th><th>Total</th><th>Count</th><th>Max</th></tr></thead>
+<tbody>
+{{range .TopQueries}}<tr><td class="mono" title="{{.SQL}}">{{trunc .SQL 90}}</td><td class="num">{{ms .TotalMs}}</td><td class="num">{{.Count}}</td><td class="num">{{ms .MaxMs}}</td></tr>{{end}}
+</tbody>
+</table>
+{{else}}<p class="empty">No slow queries captured — enable MONITOR_SLOW_QUERY_MS on the backend.</p>{{end}}
 {{end}}

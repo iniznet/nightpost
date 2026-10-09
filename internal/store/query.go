@@ -2,6 +2,8 @@ package store
 
 import (
 	"fmt"
+	"regexp"
+	"strings"
 	"time"
 )
 
@@ -19,17 +21,36 @@ type QueryAgg struct {
 	LastSeen    time.Time
 }
 
-// ForQuery groups slow queries by statement shape: numbers, uuids, hex ids
-// and quoted literals blanked through the shared normalize().
+// sqlNumRe blanks STANDALONE numeric literals only. The shared numRe
+// ([0-9]+) would glue year-suffixed table names — orders_2024 and
+// orders_2025 are distinct statements, while id = 5 and id = 6 must
+// collapse — so SQL needs the boundary-aware variant. ( is RE2-supported;
+// no PREG byte-offset mixing here: ReplaceAllString is character-safe.)
+var sqlNumRe = regexp.MustCompile(`\b\d+\b`)
+
+// normalizeSQL is the single grouping authority for query telemetry (#157):
+// the backend ships placeholder SQL verbatim, every other producer's raw
+// SQL lands shaped the same way.
+func normalizeSQL(s string) string {
+	s = uuidRe.ReplaceAllString(s, "<uuid>")
+	s = hexRe.ReplaceAllString(s, "<hex>")
+	s = strRe.ReplaceAllString(s, "<s>")
+	s = sqlNumRe.ReplaceAllString(s, "<n>")
+	return strings.TrimSpace(s)
+}
+
+// ForQuery groups slow queries by statement shape. New key in the same
+// unreleased PR as query_stats — no re-grouping of stored rows is possible
+// (the fingerprint freeze applies to ForException/ForLog only).
 func ForQuery(sql string) string {
-	return hash("query|" + normalize(sql))
+	return hash("query|" + normalizeSQL(sql))
 }
 
 // RecordQuery upserts the aggregate row and the paired issue. The issues
 // upsert mirrors RecordError's RETURNING pattern.
 func (s *Store) RecordQuery(projectKey, sql string, timeMs float64, connection, environment string) (int64, error) {
 	now := time.Now().Unix()
-	norm := normalize(sql)
+	norm := normalizeSQL(sql)
 	if len(norm) > 4000 {
 		norm = norm[:4000]
 	}
