@@ -100,6 +100,16 @@ func presentedKey(r *http.Request) string {
 	if h := r.Header.Get("Authorization"); len(h) > 7 && strings.EqualFold(h[:7], "bearer ") {
 		return strings.TrimSpace(h[7:])
 	}
+	// URL-native senders (the xhprof extension POSTs straight from the
+	// endpoint's userinfo and cannot set custom headers) authenticate as
+	// HTTP Basic: the PASSWORD segment carries the ingest key, the username
+	// stays the project name. Bearer/X-Monitor-Key remain the preferred
+	// paths for every producer that controls its own headers.
+	if h := r.Header.Get("Authorization"); len(h) > 6 && strings.EqualFold(h[:6], "basic ") {
+		if _, pass, ok := r.BasicAuth(); ok {
+			return pass
+		}
+	}
 	return ""
 }
 

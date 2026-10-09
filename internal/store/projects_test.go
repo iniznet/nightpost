@@ -67,3 +67,30 @@ func TestProjectProvisionAndRotation(t *testing.T) {
 		t.Fatal("rotation must stamp rotated_at")
 	}
 }
+
+func TestRevokeIngestKeyFallsBackToUnsigned(t *testing.T) {
+	st := newTestStore(t)
+	if err := st.EnsureProject("alpha"); err != nil {
+		t.Fatal(err)
+	}
+	secret, err := st.RotateIngestKey("alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if k, _ := st.ProjectIngestKey("alpha"); k != HashIngestKey(secret) {
+		t.Fatal("rotation must store the hash")
+	}
+	if err := st.RevokeIngestKey("alpha"); err != nil {
+		t.Fatal(err)
+	}
+	if k, _ := st.ProjectIngestKey("alpha"); k != "" {
+		t.Fatalf("revoke must clear the key, got %q", k)
+	}
+	rows, err := st.ListProjects()
+	if err != nil || len(rows) != 1 || rows[0].HasKey() {
+		t.Fatalf("revoked project must render unsigned: %+v err=%v", rows, err)
+	}
+	if err := st.RevokeIngestKey("never-seen"); err != nil {
+		t.Fatalf("revoke of an unknown project must be a no-op, got %v", err)
+	}
+}

@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -136,5 +137,22 @@ func TestPresentedKeyForms(t *testing.T) {
 	req.Header.Set("X-Monitor-Key", "hk")
 	if got := presentedKey(req); got != "hk" {
 		t.Fatalf("X-Monitor-Key must win, got %q", got)
+	}
+}
+
+func TestKeyGateBasicAuthPasswordCarriesKey(t *testing.T) {
+	f := &fakeKeys{keys: map[string]string{"secured": store.HashIngestKey("s3cret")}, ensured: map[string]int{}}
+	g := NewKeyGate(f, 0)
+	good := "Basic " + base64.StdEncoding.EncodeToString([]byte("secured:s3cret"))
+	if code := post(g, "secured", "Authorization", good); code != http.StatusAccepted {
+		t.Fatalf("basic password must authenticate URL-native senders, got %d", code)
+	}
+	bad := "Basic " + base64.StdEncoding.EncodeToString([]byte("secured:wrong"))
+	if code := post(g, "secured", "Authorization", bad); code != http.StatusUnauthorized {
+		t.Fatalf("wrong basic password must 401, got %d", code)
+	}
+	empty := "Basic " + base64.StdEncoding.EncodeToString([]byte("secured:"))
+	if code := post(g, "secured", "Authorization", empty); code != http.StatusUnauthorized {
+		t.Fatalf("user-only userinfo (no key) must 401 once a key is set, got %d", code)
 	}
 }

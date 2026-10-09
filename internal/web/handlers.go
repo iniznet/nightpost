@@ -361,6 +361,45 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *A
 		}
 	})
 
+	page.HandleFunc("POST /keys/revoke", func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "malformed form", http.StatusBadRequest)
+			return
+		}
+		if origin := r.Header.Get("Origin"); origin != "" {
+			u, uerr := url.Parse(origin)
+			if uerr != nil || !strings.EqualFold(u.Host, r.Host) {
+				http.Error(w, "cross-origin revoke rejected", http.StatusForbidden)
+				return
+			}
+		}
+		project := strings.TrimSpace(r.FormValue("project"))
+		if project == "" {
+			http.Error(w, "project required", http.StatusBadRequest)
+			return
+		}
+		if err := st.RevokeIngestKey(project); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if gate != nil {
+			gate.Invalidate(project)
+		}
+		log.Printf("ingest key revoked for project %q", project)
+		data := baseData(st, project, PageKeys)
+		projects, perr := st.ListProjects()
+		if perr != nil {
+			http.Error(w, perr.Error(), http.StatusInternalServerError)
+			return
+		}
+		data["ProjectRows"] = projects
+		data["Revoked"] = project
+		w.Header().Set("Cache-Control", "no-store")
+		if err := keysTmpl.ExecuteTemplate(w, "layout", data); err != nil {
+			log.Printf("render keys: %v", err)
+		}
+	})
+
 	page.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		project := r.URL.Query().Get("project")
 		data := baseData(st, project, PageDashboard)
