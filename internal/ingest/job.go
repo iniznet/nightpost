@@ -19,6 +19,10 @@ type jobPayload struct {
 	Seconds float64 `json:"seconds"`
 	OK      *bool   `json:"ok"`
 	Count   int64   `json:"count"`
+	// Trace is the per-run trace id of the last profiled leg (#203); it is
+	// random hex minted by the producer, never user-derived, so it carries
+	// no reader data across this boundary.
+	Trace   string  `json:"trace"`
 }
 
 const maxJobName = 191
@@ -72,7 +76,7 @@ func JobHandler(st *store.Store) http.HandlerFunc {
 		if count > 100000 {
 			count = 100000
 		}
-		if err := st.RecordJob(project, kind, p.Name, p.Queue, p.Seconds, ok, count); err != nil {
+		if err := st.RecordJob(project, kind, p.Name, p.Queue, p.Seconds, ok, count, p.Trace); err != nil {
 			http.Error(w, "record job: "+err.Error(), http.StatusInternalServerError)
 			return
 		}

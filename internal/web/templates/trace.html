@@ -4,7 +4,7 @@
 <p class="faint"><span class="mono">{{.TraceID}}</span> · total <span class="mono">{{ms .Trace.TotalMs}}</span> · {{len .Trace.Legs}} legs · <span title="{{.Trace.FirstSeen.Format "2006-01-02 15:04:05"}}">{{rel .Trace.FirstSeen}}</span></p>
 <div class="filterbar">
 {{range .Trace.Legs}}
-  <a href="/profiles/{{.ID}}" class="pill">{{.ProjectKey}}: {{.Name}} ({{ms .DurationMs}})</a>
+  <a href="/profiles/{{.ID}}" class="pill">{{if ne .Type "request"}}[{{.Type}}] {{end}}{{.ProjectKey}}: {{.Name}} ({{ms .DurationMs}})</a>
 {{end}}
 </div>
 {{if .Trace.Rows}}

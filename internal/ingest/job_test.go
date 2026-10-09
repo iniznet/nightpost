@@ -76,3 +76,17 @@ func TestJobHandlerRejectsGarbage(t *testing.T) {
 		t.Fatal("rejected payloads must not create rows")
 	}
 }
+
+func TestJobHandlerStoresLastTrace(t *testing.T) {
+	st := openQueryStore(t)
+	if code := doJob(t, st, `{"name":"schedule:run","kind":"command","seconds":9.5,"ok":true,"count":1,"trace":"deadbeefcafe0123"}`); code != http.StatusAccepted {
+		t.Fatalf("accepted expected, got %d", code)
+	}
+	if code := doJob(t, st, `{"name":"schedule:run","kind":"command","seconds":1.5,"ok":true,"count":1}`); code != http.StatusAccepted {
+		t.Fatalf("accepted expected, got %d", code)
+	}
+	rows, err := st.JobLeaderboard("", 24*7, 50)
+	if err != nil || len(rows) != 1 || rows[0].LastTrace != "deadbeefcafe0123" {
+		t.Fatalf("trace round-trip failed: %+v err=%v", rows, err)
+	}
+}

@@ -45,7 +45,9 @@ func ProfileHandler(st *store.Store) http.HandlerFunc {
 			http.Error(w, "invalid profile", http.StatusBadRequest)
 			return
 		}
-		if payload.Type != store.ProfileTypeCallgraph {
+		switch payload.Type {
+		case store.ProfileTypeCallgraph, store.ProfileTypeJob, store.ProfileTypeCommand:
+		default:
 			payload.Type = store.ProfileTypeRequest
 		}
 

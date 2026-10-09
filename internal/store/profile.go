@@ -7,11 +7,14 @@ import (
 	"time"
 )
 
-// Profile types: "request" (client-reported route timing) and "callgraph"
-// (code-level attribution from xhprof or the V8 sampling profiler).
+// Profile types: "request" (client-reported route timing), "callgraph"
+// (code-level attribution from xhprof or the V8 sampling profiler), and the
+// per-run job/command legs of #203 that make /jobs drill into /traces.
 const (
 	ProfileTypeRequest   = "request"
 	ProfileTypeCallgraph = "callgraph"
+	ProfileTypeJob       = "job"
+	ProfileTypeCommand   = "command"
 )
 
 const (

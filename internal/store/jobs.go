@@ -25,6 +25,7 @@ type JobAgg struct {
 	LastRunAt   time.Time
 	LastOKAt    time.Time
 	LastStatus  string // ok | failed
+	LastTrace   string // run trace id of the last profiled leg (#203), '' until one lands
 }
 
 const jobWindowSeconds = 86400
@@ -37,7 +38,7 @@ const jobWindowSeconds = 86400
 // stores failures_24h plus fail_window_start; a failure arriving 24h+
 // after the stored window start reopens the window at 1, and readers
 // recompute staleness so a one-off old failure never displays as recent.
-func (s *Store) RecordJob(projectKey, kind, name, queue string, seconds float64, ok bool, count int64) error {
+func (s *Store) RecordJob(projectKey, kind, name, queue string, seconds float64, ok bool, count int64, lastTrace string) error {
 	if seconds < 0 {
 		seconds = 0
 	}
@@ -60,8 +61,8 @@ func (s *Store) RecordJob(projectKey, kind, name, queue string, seconds float64,
 	}
 	_, err := s.wdb.Exec(`INSERT INTO job_stats
 		(project_key, kind, name, queue, runs, failures, fail_window_start, failures_24h,
-		 seconds_sum, seconds_count, last_ok_at, last_run_at, last_seconds, last_status)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 seconds_sum, seconds_count, last_ok_at, last_run_at, last_seconds, last_status, last_trace)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(project_key, kind, name) DO UPDATE SET
 			queue = COALESCE(NULLIF(excluded.queue, ''), job_stats.queue),
 			runs = job_stats.runs + excluded.runs,
@@ -79,8 +80,9 @@ func (s *Store) RecordJob(projectKey, kind, name, queue string, seconds float64,
 			last_ok_at = CASE WHEN excluded.last_status = 'ok' THEN excluded.last_run_at ELSE job_stats.last_ok_at END,
 			last_run_at = excluded.last_run_at,
 			last_seconds = excluded.last_seconds,
-			last_status = excluded.last_status`,
-		projectKey, kind, name, queue, count, int64(fail)*count, winStart, int64(fail)*count, seconds*float64(count), count, okAt, now, seconds, status)
+			last_status = excluded.last_status,
+			last_trace = COALESCE(NULLIF(excluded.last_trace, ''), job_stats.last_trace)`,
+		projectKey, kind, name, queue, count, int64(fail)*count, winStart, int64(fail)*count, seconds*float64(count), count, okAt, now, seconds, status, truncate(lastTrace, 64))
 	if err != nil {
 		return fmt.Errorf("record job: %w", err)
 	}
@@ -101,7 +103,7 @@ func (s *Store) JobLeaderboard(project string, hours, limit int) ([]JobAgg, erro
 	cutoff := now - int64(hours)*3600
 	rows, err := s.rdb.Query(`SELECT project_key, kind, name, queue, runs, failures,
 		CASE WHEN fail_window_start = 0 OR ? - fail_window_start >= 86400 THEN 0 ELSE failures_24h END,
-		seconds_sum, seconds_count, last_ok_at, last_run_at, last_seconds, last_status
+		seconds_sum, seconds_count, last_ok_at, last_run_at, last_seconds, last_status, last_trace
 		FROM job_stats
 		WHERE (? = '' OR project_key = ?) AND last_run_at >= ?
 		ORDER BY last_run_at DESC LIMIT ?`,
@@ -117,7 +119,7 @@ func (s *Store) JobLeaderboard(project string, hours, limit int) ([]JobAgg, erro
 		var sum float64
 		var count int64
 		if err := rows.Scan(&j.ProjectKey, &j.Kind, &j.Name, &j.Queue, &j.Runs, &j.Failures,
-			&j.Failures24h, &sum, &count, &lastOK, &lastRun, &j.LastMs, &j.LastStatus); err != nil {
+			&j.Failures24h, &sum, &count, &lastOK, &lastRun, &j.LastMs, &j.LastStatus, &j.LastTrace); err != nil {
 			return nil, err
 		}
 		j.LastMs *= 1000
