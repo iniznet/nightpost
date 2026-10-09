@@ -27,8 +27,9 @@
 # stable -session-secret (else logins die on every restart) and optionally
 # -alerts-config /path/alerts.json (mounted secret file; channels + rules).
 # Lost admin: one-off `docker exec ... monitor -reset-admin <email>` prints
-# a fresh password once. Ingest keys rotate at /keys; unsigned legacy ingest
-# still works until a key is issued.
+# a fresh password once. Ingest keys rotate OR revoke at /keys (revoke falls
+# back to unsigned legacy); unsigned legacy ingest still works until a key is
+# issued.
 
 services:
   monitor:

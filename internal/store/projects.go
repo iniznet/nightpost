@@ -103,6 +103,17 @@ func (s *Store) RotateIngestKey(key string) (string, error) {
 	return secret, nil
 }
 
+// RevokeIngestKey drops a project's ingest key, returning it to unsigned
+// (legacy) admission — the escape hatch when a producer cannot present the
+// key (rotated too early, lost secret, un-upgradable client). Callers must
+// invalidate any cached gate decision, exactly like rotation.
+func (s *Store) RevokeIngestKey(key string) error {
+	if _, err := s.wdb.Exec(`UPDATE projects SET ingest_key = '', rotated_at = 0 WHERE key = ?`, key); err != nil {
+		return fmt.Errorf("revoke ingest key: %w", err)
+	}
+	return nil
+}
+
 // UnsignedProjectCount reports projects still accepting legacy ingest;
 // boot uses it for the deprecation warning (#157).
 func (s *Store) UnsignedProjectCount() (int, error) {

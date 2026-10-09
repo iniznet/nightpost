@@ -1,9 +1,12 @@
 {{define "title"}}Ingest keys — fenrirealm-monitor{{end}}
 {{define "content"}}
 <h1>Ingest keys</h1>
-<p class="faint">Per-project bearer keys for every ingest route. A project without a key still accepts unsigned (legacy) traffic; rotating takes effect immediately — update the producer env in the same window.</p>
+<p class="faint">Per-project bearer keys for every ingest route. A project without a key still accepts unsigned (legacy) traffic; rotating or revoking takes effect immediately — update the producer env in the same window. Revoking drops the project back to unsigned (legacy) admission.</p>
 {{if .NewKey}}
 <div class="flash">New key for <b class="mono">{{.NewKeyProject}}</b>: <code class="mono">{{.NewKey}}</code> — copy it now, it is shown once.</div>
+{{end}}
+{{if .Revoked}}
+<div class="flash">Key revoked for <b class="mono">{{.Revoked}}</b> — the project now accepts unsigned (legacy) traffic again.</div>
 {{end}}
 {{if .ProjectRows}}
 <table>
@@ -19,6 +22,12 @@
       <input type="hidden" name="project" value="{{.Key}}">
       <button type="submit">{{if .HasKey}}Rotate{{else}}Issue key{{end}}</button>
     </form>
+    {{if .HasKey}}
+    <form method="post" action="/keys/revoke">
+      <input type="hidden" name="project" value="{{.Key}}">
+      <button type="submit">Revoke</button>
+    </form>
+    {{end}}
   </td>
 </tr>
 {{end}}

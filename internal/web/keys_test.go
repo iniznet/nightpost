@@ -131,3 +131,48 @@ func TestKeysRotateRejectsEmptyProject(t *testing.T) {
 		t.Fatalf("empty project must 400, got %d", rec.Code)
 	}
 }
+
+func TestKeysPageRevokeFlow(t *testing.T) {
+	st := openKeysStore(t)
+	if _, err := st.RecordError("alpha", "Ex", "boom", "fp", "production", "error", nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ProvisionProjects(); err != nil {
+		t.Fatal(err)
+	}
+	gate := ingest.NewKeyGate(st, time.Second)
+	mux := http.NewServeMux()
+	Register(mux, st, gate, nil)
+
+	form := strings.NewReader("project=alpha")
+	req := httptest.NewRequest(http.MethodPost, "/keys/rotate", form)
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("rotate: %d", rec.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/keys/revoke", strings.NewReader("project=alpha"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /keys/revoke: %d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "revoked") {
+		t.Fatal("revoke must flash a confirmation")
+	}
+	if k, _ := st.ProjectIngestKey("alpha"); k != "" {
+		t.Fatal("revoke must clear the stored key")
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/keys/revoke", strings.NewReader("project=alpha"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Origin", "http://evil.example")
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("cross-origin revoke must 403, got %d", rec.Code)
+	}
+}
