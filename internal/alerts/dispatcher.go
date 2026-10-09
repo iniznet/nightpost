@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -31,15 +31,16 @@ type Event struct {
 // failure records nothing, so the same match is retried next tick; a
 // success starts the cooldown clock — exactly-once-per-window semantics.
 type Dispatcher struct {
-	st      *store.Store
-	cfg     *Config
-	cfgPath string
-	mtime   time.Time
-	Senders map[string]Sender
+	st        *store.Store
+	cfg       *Config
+	cfgPath   string
+	mtime     time.Time
+	startedAt time.Time
+	Senders   map[string]Sender
 }
 
 func NewDispatcher(st *store.Store, cfg *Config, cfgPath string) *Dispatcher {
-	d := &Dispatcher{st: st, cfg: cfg, cfgPath: cfgPath, Senders: map[string]Sender{}}
+	d := &Dispatcher{st: st, cfg: cfg, cfgPath: cfgPath, Senders: map[string]Sender{}, startedAt: time.Now()}
 	for _, ch := range cfg.Channels {
 		switch ch.Type {
 		case "discord":
@@ -212,6 +213,37 @@ func (d *Dispatcher) evaluate(r Rule, now time.Time) []Event {
 				Title: fmt.Sprintf("%d occurrences in %dm: %s", cb.N, r.windowMinutes(), trunc(cb.Title, 120)),
 				Body:  fmt.Sprintf("Project %s crossed the count-window threshold of %d.", cb.ProjectKey, r.Threshold),
 				Link:  "/issues?status=all"})
+		}
+		return out
+	case "heartbeat":
+		mult := r.GraceMultiplier
+		if mult <= 0 {
+			mult = 2
+		}
+		need := r.CadenceSeconds * int64(mult)
+		var out []Event
+		for _, p := range r.Projects {
+			lastOK, err := d.st.JobLastOKAt(p, "command", r.Command)
+			if err != nil {
+				log.Printf("alerts: heartbeat eval %s/%s: %v", p, r.Command, err)
+				continue
+			}
+			ageFrom := lastOK
+			if ageFrom == 0 {
+				// Never observed: the clock starts at monitor boot so a
+				// fresh deploy cannot false-fire before one full window.
+				ageFrom = d.startedAt.Unix()
+			}
+			if now.Unix()-ageFrom < need {
+				continue
+			}
+			body := fmt.Sprintf("last success %ds ago (expected within %ds)", now.Unix()-lastOK, need)
+			if lastOK == 0 {
+				body = fmt.Sprintf("no successful run recorded since monitor boot %ds ago (expected every %ds)", now.Unix()-d.startedAt.Unix(), r.CadenceSeconds)
+			}
+			out = append(out, Event{Rule: r.Type, TargetKey: p + "|" + r.Command,
+				Title: fmt.Sprintf("Heartbeat stale in %s: %s", p, trunc(r.Command, 100)),
+				Body:  body, Link: "/jobs?project=" + p})
 		}
 		return out
 	case "p95-latency":

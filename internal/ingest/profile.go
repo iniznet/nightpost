@@ -96,6 +96,7 @@ func ErrorHandler(st *store.Store) http.HandlerFunc {
 			Route       string `json:"route"`
 			Environment string `json:"environment"`
 			Release     string `json:"release"`
+			UserID      any    `json:"user_id"`
 		}
 		if err := json.Unmarshal(body, &payload); err != nil || payload.Message == "" {
 			http.Error(w, "invalid error report", http.StatusBadRequest)
@@ -108,6 +109,7 @@ func ErrorHandler(st *store.Store) http.HandlerFunc {
 			"route":   payload.Route,
 			"stack":   truncate(payload.Stack, 16<<10),
 			"release": payload.Release,
+			"user_id": payload.UserID,
 		}
 		if _, err := st.RecordError(projectKey, "JSError", payload.Message, fp, payload.Environment, "error", ctx); err != nil {
 			log.Printf("record js error: %v", err)

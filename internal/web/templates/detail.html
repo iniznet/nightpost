@@ -7,8 +7,10 @@
   {{if .Issue.ExceptionClass}}<span class="badge mono">{{.Issue.ExceptionClass}}</span>{{end}}
   <span class="badge lvl-{{.Issue.Level}}">{{or .Issue.Level "error"}}</span>
   {{if .Issue.Environment}}<span class="badge">{{.Issue.Environment}}</span>{{end}}
+  {{if .NewSince}}<span class="badge">new in {{.NewSince.Version}}</span>{{end}}
   {{if .Issue.Channel}}<span class="badge mono">{{.Issue.Channel}}</span>{{end}}
   <span class="badge">count {{.Issue.Count}}</span>
+  {{if .ImpactedUsers}}<span class="badge">{{.ImpactedUsers}} users affected</span>{{end}}
   <span class="faint">first {{rel .Issue.FirstSeenAt}} · last {{rel .Issue.LastSeenAt}}</span>
 </p>
 <div class="actions">

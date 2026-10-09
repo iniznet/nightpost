@@ -20,6 +20,10 @@
     <option value="">env: all</option>
     {{range .Envs}}<option value="{{.}}"{{if eq . $.Filter.Env}} selected{{end}}>{{.}}</option>{{end}}
   </select>
+  <select name="new_since">
+    <option value="">deploy scope: all</option>
+    <option value="release"{{if eq .Filter.NewSince "release"}} selected{{end}}>new since release</option>
+  </select>
   <select name="status">
     <option value="open"{{if eq .Filter.Status "open"}} selected{{end}}>open</option>
     <option value="resolved"{{if eq .Filter.Status "resolved"}} selected{{end}}>resolved</option>
@@ -29,21 +33,22 @@
 </form>
 <div class="filterbar">
   <span class="label">sort</span>
-  <a href="?project={{.Project}}&type={{.Filter.Type}}&level={{.Filter.Level}}&env={{.Filter.Env}}&status={{.Filter.Status}}&q={{urlquery .Filter.Q}}&sort=pain" class="pill{{if eq .Filter.Sort "pain"}} on{{end}}">pain (count)</a>
-  <a href="?project={{.Project}}&type={{.Filter.Type}}&level={{.Filter.Level}}&env={{.Filter.Env}}&status={{.Filter.Status}}&q={{urlquery .Filter.Q}}&sort=recent" class="pill{{if eq .Filter.Sort "recent"}} on{{end}}">recent</a>
+  <a href="?project={{.Project}}&type={{.Filter.Type}}&level={{.Filter.Level}}&env={{.Filter.Env}}&status={{.Filter.Status}}&q={{urlquery .Filter.Q}}&new_since={{.Filter.NewSince}}&sort=pain" class="pill{{if eq .Filter.Sort "pain"}} on{{end}}">pain (count)</a>
+  <a href="?project={{.Project}}&type={{.Filter.Type}}&level={{.Filter.Level}}&env={{.Filter.Env}}&status={{.Filter.Status}}&q={{urlquery .Filter.Q}}&new_since={{.Filter.NewSince}}&sort=recent" class="pill{{if eq .Filter.Sort "recent"}} on{{end}}">recent</a>
 </div>
 {{if .Issues}}
 <table>
-<thead><tr><th>Title</th><th>Type</th><th>Class</th><th>Level</th><th>Env</th><th>Count</th><th>Trend</th><th>Last seen</th></tr></thead>
+<thead><tr><th>Title</th><th>Type</th><th>Class</th><th>Level</th><th>Env</th><th>Count</th><th>Users</th><th>Trend</th><th>Last seen</th></tr></thead>
 <tbody>
 {{range .Issues}}
 <tr class="{{if .Resolved}}resolved{{end}}{{if eq .ID 0}} group{{end}}">
-  <td>{{if eq .ID 0}}<a href="/issues?project={{$.Project}}&q={{urlquery "Not found:"}}&status={{$.Filter.Status}}&sort=pain">{{.Title}}</a>{{else}}<a href="/issues/{{.ID}}">{{.Title}}</a>{{end}}</td>
+  <td>{{if eq .ID 0}}<a href="/issues?project={{$.Project}}&q={{urlquery "Not found:"}}&status={{$.Filter.Status}}&sort=pain">{{.Title}}</a>{{else}}<a href="/issues/{{.ID}}">{{.Title}}</a>{{end}}{{if and $.NewSince (.FirstSeenAt.After $.NewSince.At)}} <span class="badge">new in {{$.NewSince.Version}}</span>{{end}}</td>
   <td><span class="badge">{{.Type}}</span></td>
   <td class="mono dim">{{if .ExceptionClass}}{{.ExceptionClass}}{{else}}—{{end}}</td>
   <td><span class="badge lvl-{{.Level}}">{{or .Level "error"}}</span></td>
   <td class="dim">{{or .Environment "—"}}</td>
   <td class="num">{{.Count}}</td>
+  <td class="num">{{with index $.UserCounts .ID}}{{.}}{{else}}—{{end}}</td>
   <td>{{with index $.Spark .ID}}{{if .}}<svg class="spark" width="96" height="24" viewBox="0 0 96 24" aria-label="occurrences per hour, last 24h"><polyline class="spark-line" points="{{spark .}}"/></svg>{{else}}<span class="faint">—</span>{{end}}{{else}}<span class="faint">—</span>{{end}}</td>
   <td class="dim" title="{{.LastSeenAt.Format "2006-01-02 15:04:05"}}">{{rel .LastSeenAt}}</td>
 </tr>

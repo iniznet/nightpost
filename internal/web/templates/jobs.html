@@ -1,0 +1,25 @@
+{{define "title"}}Jobs — fenrirealm-monitor{{end}}
+{{define "content"}}
+<h1>Jobs &amp; commands</h1>
+<p class="faint">Queue jobs and Artisan commands grouped by name over the last 7 days — cadence, outcome and a rolling 24h failure count. Payloads and arguments are never captured.</p>
+{{if .Rows}}
+<table>
+<thead><tr><th>Name</th><th>Kind</th><th>Queue</th><th>Last run</th><th>Status</th><th>Runs</th><th>Fails 24h</th><th>Avg</th><th>Last</th></tr></thead>
+<tbody>
+{{range .Rows}}
+<tr>
+  <td class="mono" title="{{.Name}}">{{trunc .Name 90}}</td>
+  <td class="dim">{{.Kind}}</td>
+  <td class="mono dim">{{or .Queue "—"}}</td>
+  <td class="dim" title="{{.LastRunAt.Format "2006-01-02 15:04:05"}}">{{rel .LastRunAt}}</td>
+  <td><span class="badge lvl-{{if eq .LastStatus "ok"}}info{{else}}error{{end}}">{{.LastStatus}}</span></td>
+  <td class="num">{{.Runs}}</td>
+  <td class="num">{{if .Failures24h}}{{.Failures24h}}{{else}}—{{end}}</td>
+  <td class="num">{{ms .AvgMs}}</td>
+  <td class="num">{{ms .LastMs}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{else}}<p class="empty">No job telemetry captured yet — enable MONITOR_JOB_CAPTURE on the backend.</p>{{end}}
+{{end}}
