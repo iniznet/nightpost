@@ -1,19 +1,20 @@
 package store
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
 
 func TestRecordJobAggregates(t *testing.T) {
 	st := newTestStore(t)
-	if err := st.RecordJob("backend", "command", "quests:reset-stale-progress", "", 2.5, true, 1); err != nil {
+	if err := st.RecordJob("backend", "command", "quests:reset-stale-progress", "", 2.5, true, 1, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.RecordJob("backend", "command", "quests:reset-stale-progress", "", 4.5, true, 1); err != nil {
+	if err := st.RecordJob("backend", "command", "quests:reset-stale-progress", "", 4.5, true, 1, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.RecordJob("backend", "command", "quests:reset-stale-progress", "", 1.0, false, 1); err != nil {
+	if err := st.RecordJob("backend", "command", "quests:reset-stale-progress", "", 1.0, false, 1, ""); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := st.JobLeaderboard("", 24, 50)
@@ -39,7 +40,7 @@ func TestRecordJobAggregates(t *testing.T) {
 	if j.LastMs != 1000 {
 		t.Fatalf("last=%f want 1000", j.LastMs)
 	}
-	if err := st.RecordJob("backend", "command", "quests:reset-stale-progress", "", 3.0, true, 1); err != nil {
+	if err := st.RecordJob("backend", "command", "quests:reset-stale-progress", "", 3.0, true, 1, ""); err != nil {
 		t.Fatal(err)
 	}
 	rows, _ = st.JobLeaderboard("", 24, 50)
@@ -50,13 +51,13 @@ func TestRecordJobAggregates(t *testing.T) {
 
 func TestJobQueueColumnAndStaleWindow(t *testing.T) {
 	st := newTestStore(t)
-	if err := st.RecordJob("backend", "queue", "App\\\\Jobs\\\\X", "", 1, true, 1); err != nil {
+	if err := st.RecordJob("backend", "queue", "App\\\\Jobs\\\\X", "", 1, true, 1, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.RecordJob("backend", "queue", "App\\\\Jobs\\\\X", "high", 1, false, 1); err != nil {
+	if err := st.RecordJob("backend", "queue", "App\\\\Jobs\\\\X", "high", 1, false, 1, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.RecordJob("backend", "queue", "App\\\\Jobs\\\\X", "", 1, true, 1); err != nil {
+	if err := st.RecordJob("backend", "queue", "App\\\\Jobs\\\\X", "", 1, true, 1, ""); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := st.JobLeaderboard("", 24, 50)
@@ -73,7 +74,7 @@ func TestJobQueueColumnAndStaleWindow(t *testing.T) {
 	if rows[0].Failures24h != 0 {
 		t.Fatalf("stale window must display 0, got %d", rows[0].Failures24h)
 	}
-	if err := st.RecordJob("backend", "queue", "App\\\\Jobs\\\\X", "", 1, false, 1); err != nil {
+	if err := st.RecordJob("backend", "queue", "App\\\\Jobs\\\\X", "", 1, false, 1, ""); err != nil {
 		t.Fatal(err)
 	}
 	rows, _ = st.JobLeaderboard("", 24, 50)
@@ -88,25 +89,47 @@ func TestJobLastOKAtHeartbeatLookup(t *testing.T) {
 	if err != nil || got != 0 {
 		t.Fatalf("missing row must report 0: %v %d", err, got)
 	}
-	if err := st.RecordJob("backend", "command", "chapters:publish-scheduled", "", 1, false, 1); err != nil {
+	if err := st.RecordJob("backend", "command", "chapters:publish-scheduled", "", 1, false, 1, ""); err != nil {
 		t.Fatal(err)
 	}
 	got, _ = st.JobLastOKAt("backend", "command", "chapters:publish-scheduled")
 	if got != 0 {
 		t.Fatalf("failed-only history has no ok baseline, got %d", got)
 	}
-	if err := st.RecordJob("backend", "command", "chapters:publish-scheduled", "", 1, true, 1); err != nil {
+	if err := st.RecordJob("backend", "command", "chapters:publish-scheduled", "", 1, true, 1, ""); err != nil {
 		t.Fatal(err)
 	}
 	got, _ = st.JobLastOKAt("backend", "command", "chapters:publish-scheduled")
 	if got == 0 {
 		t.Fatal("successful run must set the heartbeat baseline")
 	}
-	if err := st.RecordJob("backend", "command", "chapters:publish-scheduled", "", 1, false, 1); err != nil {
+	if err := st.RecordJob("backend", "command", "chapters:publish-scheduled", "", 1, false, 1, ""); err != nil {
 		t.Fatal(err)
 	}
 	got2, _ := st.JobLastOKAt("backend", "command", "chapters:publish-scheduled")
 	if got2 != got {
 		t.Fatal("a later failure must not move last_ok_at")
+	}
+}
+
+func TestRecordJobLastTrace(t *testing.T) {
+	st := newTestStore(t)
+	if err := st.RecordJob("backend", "command", "schedule:run", "", 5, true, 1, "a1b2c3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.RecordJob("backend", "command", "schedule:run", "", 6, true, 1, ""); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := st.JobLeaderboard("", 24*7, 50)
+	if err != nil || len(rows) != 1 || rows[0].LastTrace != "a1b2c3" {
+		t.Fatalf("empty trace must preserve the stored one, got %+v err=%v", rows, err)
+	}
+	long := strings.Repeat("x", 100)
+	if err := st.RecordJob("backend", "command", "schedule:run", "", 7, true, 1, long); err != nil {
+		t.Fatal(err)
+	}
+	rows, _ = st.JobLeaderboard("", 24*7, 50)
+	if rows[0].LastTrace != long[:64] {
+		t.Fatalf("trace must be truncated to 64, got %d bytes", len(rows[0].LastTrace))
 	}
 }

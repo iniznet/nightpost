@@ -16,7 +16,7 @@
   <td class="num">{{.Runs}}</td>
   <td class="num">{{if .Failures24h}}{{.Failures24h}}{{else}}—{{end}}</td>
   <td class="num">{{ms .AvgMs}}</td>
-  <td class="num">{{ms .LastMs}}</td>
+  <td class="num">{{if .LastTrace}}<a href="/traces/{{.LastTrace}}" title="waterfall + call tree of the last profiled run">{{ms .LastMs}}</a>{{else}}{{ms .LastMs}}{{end}}</td>
 </tr>
 {{end}}
 </tbody>

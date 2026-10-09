@@ -12,7 +12,7 @@ func hbRule(cooldown int) Rule {
 
 func TestHeartbeatSilentWhenFresh(t *testing.T) {
 	st := testStore(t)
-	if err := st.RecordJob("backend", "command", "quests:reset-stale-progress", "", 30, true, 1); err != nil {
+	if err := st.RecordJob("backend", "command", "quests:reset-stale-progress", "", 30, true, 1, ""); err != nil {
 		t.Fatal(err)
 	}
 	d := NewDispatcher(st, baseCfg([]Rule{hbRule(60)}), "")
@@ -25,7 +25,7 @@ func TestHeartbeatSilentWhenFresh(t *testing.T) {
 
 func TestHeartbeatFiresExactlyOnceWhenStale(t *testing.T) {
 	st := testStore(t)
-	if err := st.RecordJob("backend", "command", "quests:reset-stale-progress", "", 30, true, 1); err != nil {
+	if err := st.RecordJob("backend", "command", "quests:reset-stale-progress", "", 30, true, 1, ""); err != nil {
 		t.Fatal(err)
 	}
 	d := NewDispatcher(st, baseCfg([]Rule{hbRule(60)}), "")
@@ -55,7 +55,7 @@ func TestHeartbeatBootGraceAndRecovery(t *testing.T) {
 	if sent := d.Tick(time.Now()); len(sent) != 1 {
 		t.Fatalf("boot older than grace must alert, got %+v", sent)
 	}
-	if err := st.RecordJob("backend", "command", "quests:reset-stale-progress", "", 20, true, 1); err != nil {
+	if err := st.RecordJob("backend", "command", "quests:reset-stale-progress", "", 20, true, 1, ""); err != nil {
 		t.Fatal(err)
 	}
 	if ok, err := st.JobLastOKAt("backend", "command", "quests:reset-stale-progress"); err != nil || ok == 0 {

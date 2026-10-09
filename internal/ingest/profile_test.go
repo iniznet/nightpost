@@ -70,6 +70,33 @@ func TestProfileHandlerStoresHotspots(t *testing.T) {
 	}
 }
 
+func TestProfileHandlerKeepsJobAndCommandTypes(t *testing.T) {
+	for _, typ := range []string{"job", "command", "callgraph"} {
+		st := newBenchStore(t)
+		body := `{"name":"schedule:run","duration_ms":1234.5,"type":"` + typ + `"}`
+		req := httptest.NewRequest(http.MethodPost, "/ingest/backend/profile", strings.NewReader(body))
+		req.SetPathValue("project", "backend")
+		rec := httptest.NewRecorder()
+		ProfileHandler(st)(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s leg: 200 expected, got %d: %s", typ, rec.Code, rec.Body.String())
+		}
+		rows, err := st.Profiles("backend", 10)
+		if err != nil || len(rows) != 1 || rows[0].Type != typ {
+			t.Fatalf("%s leg must survive the type coercion, got %+v err=%v", typ, rows, err)
+		}
+	}
+	st := newBenchStore(t)
+	req := httptest.NewRequest(http.MethodPost, "/ingest/backend/profile", strings.NewReader(`{"name":"x","duration_ms":1,"type":"bogus"}`))
+	req.SetPathValue("project", "backend")
+	rec := httptest.NewRecorder()
+	ProfileHandler(st)(rec, req)
+	rows, _ := st.Profiles("backend", 10)
+	if len(rows) != 1 || rows[0].Type != store.ProfileTypeRequest {
+		t.Fatalf("unknown type must coerce to request, got %+v", rows)
+	}
+}
+
 func TestProfileHandlerRejectsGarbage(t *testing.T) {
 	st := newBenchStore(t)
 

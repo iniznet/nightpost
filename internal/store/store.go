@@ -217,6 +217,7 @@ func migrate(db *sql.DB) error {
 	last_status TEXT NOT NULL DEFAULT '',
 	PRIMARY KEY(project_key, kind, name))`},
 		{"idx_job_stats_run", `CREATE INDEX IF NOT EXISTS idx_job_stats_run ON job_stats(last_run_at DESC)`},
+		{"job_stats.last_trace", `ALTER TABLE job_stats ADD COLUMN last_trace TEXT NOT NULL DEFAULT ''`},
 		{"releases", `CREATE TABLE IF NOT EXISTS releases (
 	id INTEGER PRIMARY KEY,
 	project_key TEXT NOT NULL,

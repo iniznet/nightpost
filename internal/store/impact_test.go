@@ -44,10 +44,10 @@ func TestUserImpactExtractionAndCounts(t *testing.T) {
 
 func TestRecordJobBatchCount(t *testing.T) {
 	st := newTestStore(t)
-	if err := st.RecordJob("backend", "command", "seals:expire", "", 2, false, 5); err != nil {
+	if err := st.RecordJob("backend", "command", "seals:expire", "", 2, false, 5, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.RecordJob("backend", "command", "seals:expire", "", 1, true, 10); err != nil {
+	if err := st.RecordJob("backend", "command", "seals:expire", "", 1, true, 10, ""); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := st.JobLeaderboard("", 24, 50)
