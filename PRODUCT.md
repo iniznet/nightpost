@@ -63,10 +63,24 @@ same footer ingest-health strip.
 **Standalone** — `/` dashboard (triage cards per project: open issues, errors,
 new-since-release, p95 delta vs the previous window, error spark, deep links
 into both sections) · `/queries` slow statements · `/jobs` queue/command
-health · `/keys` per-project ingest keys.
+health · `/orgs` organizations (create an org, move projects under it) ·
+`/keys` per-project ingest keys.
 
 History: the pre-M6.1 paths (`/issues`, `/logs`, `/profiles`, `/slowest`,
 `/traces`, `/traces/{id}`) keep serving the same content (Expand/Contract).
+
+## Tenancy (M6.2)
+
+An **org** groups projects; every project carries an additive `org_id` and
+every project not explicitly assigned belongs to `Default`. Assignment never
+touches a project's key, so no producer is reconfigured to become tenanted —
+the ingest surface stays project-grain and budgets stay per project (the
+profile keep-window is per project, so a noisy sibling cannot evict another
+org's profiles and traces). Dashboard accounts get a role per org
+(`owner` / `admin` / `viewer`), seeded from the M4 single admin as owner of
+`Default`. Selecting an org in the toolbar scopes the project list,
+dashboard and keys pages; the org hierarchy is NOT an authentication
+boundary yet — role enforcement lands with M6.3's settings pages.
 
 ## Access posture
 

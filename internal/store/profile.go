@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"time"
 )
@@ -356,14 +357,36 @@ func (s *Store) ProfilesFiltered(projectKey, typ, nameLike string, limit int) ([
 	return out, rows.Err()
 }
 
-// PruneProfiles keeps the profile table bounded: the newest keep rows survive.
+// PruneProfiles keeps the profile table bounded PER PROJECT: every project
+// keeps its newest `keep` rows. A single global keep-window let one noisy
+// producer evict every other org's profiles and traces — the M6.2 acceptance
+// add — so the partition is by project_key, never by table.
+//
+// The delete is chunked and ranked by a window function, so each statement
+// stays bounded on the single writer instead of one whole-table pass.
 func (s *Store) PruneProfiles(keep int64) error {
 	if keep <= 0 {
 		keep = 5000
 	}
-	_, err := s.wdb.Exec(`DELETE FROM profiles WHERE id NOT IN
-		(SELECT id FROM profiles ORDER BY created_at DESC, id DESC LIMIT ?)`, keep)
-	return err
+	const chunk = 500
+	for {
+		res, err := s.wdb.Exec(`DELETE FROM profiles WHERE id IN (
+			SELECT id FROM (
+				SELECT id, ROW_NUMBER() OVER (
+					PARTITION BY project_key ORDER BY created_at DESC, id DESC) AS rn
+				FROM profiles
+			) WHERE rn > ? LIMIT ?)`, keep, chunk)
+		if err != nil {
+			return fmt.Errorf("prune profiles: %w", err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n < chunk {
+			return nil
+		}
+	}
 }
 
 type profileScanner interface{ Scan(dest ...any) error }

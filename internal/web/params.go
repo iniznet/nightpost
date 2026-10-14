@@ -18,6 +18,7 @@ type toolbar struct {
 	Project string
 	Range   string
 	Env     string
+	Org     string
 }
 
 // rangeSpec is one time-range option: the URL key, its short label and the
@@ -48,7 +49,7 @@ func validRange(key string) bool {
 	return false
 }
 
-// parseToolbar is the ONLY reader of the project/range/env query params. An
+// parseToolbar is the ONLY reader of the project/range/env/org query params. An
 // unknown or absent range resolves to the default and never errors, matching
 // the invariant that every page renders with zero params.
 func parseToolbar(q url.Values) toolbar {
@@ -56,6 +57,7 @@ func parseToolbar(q url.Values) toolbar {
 		Project: strings.TrimSpace(q.Get("project")),
 		Env:     strings.TrimSpace(q.Get("env")),
 		Range:   strings.TrimSpace(q.Get("range")),
+		Org:     strings.TrimSpace(q.Get("org")),
 	}
 	if !validRange(t.Range) {
 		t.Range = defaultRange
@@ -87,6 +89,9 @@ func (t toolbar) Values() url.Values {
 	}
 	if t.Env != "" {
 		v.Set("env", t.Env)
+	}
+	if t.Org != "" {
+		v.Set("org", t.Org)
 	}
 	return v
 }

@@ -148,6 +148,17 @@ CREATE INDEX IF NOT EXISTS idx_occurrences_issue ON occurrences(issue_id, seen_a
 		return nil, err
 	}
 	s := &Store{wdb: wdb, rdb: rdb, limWindows: map[string]*limWindow{}, MaxOccPerMin: 30}
+	// M6.2: the default org and its memberships are seeded BEFORE projects are
+	// auto-provisioned, so a producer admitted on first sight already has an
+	// org to land in and an upgraded volume is never orphaned.
+	if err := s.EnsureDefaultOrg(); err != nil {
+		s.Close()
+		return nil, fmt.Errorf("seed default org: %w", err)
+	}
+	if err := s.SeedMemberships(); err != nil {
+		s.Close()
+		return nil, fmt.Errorf("seed org memberships: %w", err)
+	}
 	// Auto-provision the projects table from existing event rows so upgraded
 	// volumes carry their producers as unsigned legacy projects (#157).
 	if err := s.ProvisionProjects(); err != nil {
@@ -227,6 +238,19 @@ func migrate(db *sql.DB) error {
 		{"idx_releases", `CREATE INDEX IF NOT EXISTS idx_releases ON releases(project_key, released_at DESC)`},
 		{"occ_user_id", `ALTER TABLE occurrences ADD COLUMN user_id TEXT NOT NULL DEFAULT ''`},
 		{"idx_occ_user", `CREATE INDEX IF NOT EXISTS idx_occ_user ON occurrences(issue_id, user_id)`},
+		{"orgs", `CREATE TABLE IF NOT EXISTS orgs (
+	id INTEGER PRIMARY KEY,
+	name TEXT NOT NULL,
+	slug TEXT NOT NULL UNIQUE,
+	created_at INTEGER NOT NULL DEFAULT 0)`},
+		{"org_members", `CREATE TABLE IF NOT EXISTS org_members (
+	org_id INTEGER NOT NULL,
+	user_id INTEGER NOT NULL,
+	role TEXT NOT NULL DEFAULT 'viewer',
+	created_at INTEGER NOT NULL DEFAULT 0,
+	PRIMARY KEY(org_id, user_id))`},
+		{"projects.org_id", `ALTER TABLE projects ADD COLUMN org_id INTEGER NOT NULL DEFAULT 1`},
+		{"idx_projects_org", `CREATE INDEX IF NOT EXISTS idx_projects_org ON projects(org_id)`},
 	} {
 		if _, err := db.Exec(m.stmt); err != nil {
 			// Idempotent: only "already applied" failures may pass through.

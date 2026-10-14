@@ -23,8 +23,8 @@
 - Topbar: sticky, brand lowercase mono, six section links (Dashboard, Errors,
   Performance, Queries, Jobs, Keys) with an accent underline on the active
   section — the section is derived from the page, never re-typed per template.
-- Toolbar: sticky second row holding the ONE persistent context — project,
-  time range (1h/24h/7d/30d, default 24h) and env. It is a single GET form
+- Toolbar: sticky second row holding the ONE persistent context — org,
+  project, time range (1h/24h/7d/30d, default 24h) and env. It is a single GET form
   posting to the current path, so changing context never loses the section.
   Every generated link carries the toolbar through `toolbar.Link`; the default
   range encodes away so short legacy links stay short. Pre-auth pages hide it.

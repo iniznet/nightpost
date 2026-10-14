@@ -38,6 +38,7 @@ const (
 	PageKeys        Page = "keys"
 	PageQueries     Page = "queries"
 	PageJobs        Page = "jobs"
+	PageOrgs        Page = "orgs"
 	PageLogin       Page = "login"
 	PageSetup       Page = "setup"
 )
@@ -56,6 +57,8 @@ func (p Page) nav() string {
 		return "queries"
 	case PageJobs:
 		return "jobs"
+	case PageOrgs:
+		return "orgs"
 	case PageKeys:
 		return "keys"
 	}
@@ -238,6 +241,7 @@ type server struct {
 	keys      *template.Template
 	queries   *template.Template
 	jobs      *template.Template
+	orgs      *template.Template
 
 	mu      sync.Mutex
 	stats   *store.StoreStats
@@ -390,6 +394,7 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *A
 		keys:      mustLayout("keys.html"),
 		queries:   mustLayout("queries.html"),
 		jobs:      mustLayout("jobs.html"),
+		orgs:      mustLayout("orgs.html"),
 	}
 	for _, o := range opts {
 		o(s)
@@ -429,6 +434,9 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *A
 
 	page.HandleFunc("GET /queries", s.handleQueries)
 	page.HandleFunc("GET /jobs", s.handleJobs)
+	page.HandleFunc("GET /orgs", s.handleOrgs)
+	page.HandleFunc("POST /orgs/create", s.handleOrgCreate)
+	page.HandleFunc("POST /orgs/assign", s.handleOrgAssign)
 	page.HandleFunc("GET /keys", s.handleKeys)
 	page.HandleFunc("POST /keys/rotate", s.handleKeyRotate)
 	page.HandleFunc("POST /keys/revoke", s.handleKeyRevoke)
@@ -462,7 +470,7 @@ func baseData(st *store.Store, project string, page Page) map[string]any {
 // baseData carries the fields every page needs: the toolbar context, the nav
 // state, the ingest-health strip and the (short-cached) store figures.
 func (s *server) baseData(r *http.Request, t toolbar, page Page) map[string]any {
-	projects, err := s.st.Projects()
+	projects, err := s.st.ProjectsInOrg(s.orgID(t))
 	if err != nil {
 		log.Printf("projects: %v", err)
 	}
@@ -470,8 +478,13 @@ func (s *server) baseData(r *http.Request, t toolbar, page Page) map[string]any 
 	if err != nil {
 		log.Printf("environments: %v", err)
 	}
+	orgs, err := s.st.ListOrgs()
+	if err != nil {
+		log.Printf("orgs: %v", err)
+	}
 	data := map[string]any{
 		"Projects": projects,
+		"Orgs":     orgs,
 		"Project":  t.Project,
 		"Page":     page,
 		"Nav":      page.nav(),
@@ -488,6 +501,39 @@ func (s *server) baseData(r *http.Request, t toolbar, page Page) map[string]any 
 		data["StoreStats"] = stats
 	}
 	return data
+}
+
+// orgID resolves the toolbar's org slug to an org id; 0 means every org.
+func (s *server) orgID(t toolbar) int64 {
+	if t.Org == "" {
+		return 0
+	}
+	o, err := s.st.OrgBySlug(t.Org)
+	if err != nil {
+		log.Printf("org %q: %v", t.Org, err)
+		return 0
+	}
+	return o.ID
+}
+
+// projectScope is the set of project keys the toolbar's org may see, or nil
+// when no org is selected (every project). Tenancy is enforced here, at the
+// projection the reader sees, never by re-keying the ingest surface.
+func (s *server) projectScope(t toolbar) map[string]bool {
+	orgID := s.orgID(t)
+	if orgID == 0 {
+		return nil
+	}
+	keys, err := s.st.ProjectsInOrg(orgID)
+	if err != nil {
+		log.Printf("org scope: %v", err)
+		return nil
+	}
+	set := make(map[string]bool, len(keys))
+	for _, k := range keys {
+		set[k] = true
+	}
+	return set
 }
 
 // storeStats caches the table counts for a short interval: the footer strip
@@ -948,6 +994,94 @@ func (s *server) handleJobs(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleOrgs is the M6.2 tenancy surface: create an org and move projects
+// under it. Assignment is additive — the project key and its ingest key are
+// never touched, so no producer is reconfigured to become tenanted.
+func (s *server) handleOrgs(w http.ResponseWriter, r *http.Request) {
+	s.renderOrgs(w, r, nil)
+}
+
+func (s *server) renderOrgs(w http.ResponseWriter, r *http.Request, extra map[string]any) {
+	t := parseToolbar(r.URL.Query())
+	data := s.baseData(r, t, PageOrgs)
+	orgs, err := s.st.ListOrgs()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	projects, err := s.st.ListProjects()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	assign, err := s.st.ProjectOrgMap()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	data["Orgs"] = orgs
+	data["ProjectRows"] = projects
+	data["ProjectOrg"] = assign
+	data["DefaultOrgID"] = store.DefaultOrgID
+	for k, v := range extra {
+		data[k] = v
+	}
+	if err := s.orgs.ExecuteTemplate(w, "layout", data); err != nil {
+		log.Printf("render orgs: %v", err)
+	}
+}
+
+func (s *server) handleOrgCreate(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "malformed form", http.StatusBadRequest)
+		return
+	}
+	if !sameOrigin(r) {
+		http.Error(w, "cross-origin create rejected", http.StatusForbidden)
+		return
+	}
+	name := strings.TrimSpace(r.FormValue("name"))
+	slug := strings.TrimSpace(r.FormValue("slug"))
+	if name == "" {
+		http.Error(w, "org name required", http.StatusBadRequest)
+		return
+	}
+	if _, err := s.st.CreateOrg(name, slug); err != nil {
+		s.renderOrgs(w, r, map[string]any{"Error": err.Error()})
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	s.renderOrgs(w, r, map[string]any{"Flash": "Created org " + name})
+}
+
+func (s *server) handleOrgAssign(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "malformed form", http.StatusBadRequest)
+		return
+	}
+	if !sameOrigin(r) {
+		http.Error(w, "cross-origin assign rejected", http.StatusForbidden)
+		return
+	}
+	project := strings.TrimSpace(r.FormValue("project"))
+	orgRef := strings.TrimSpace(r.FormValue("org"))
+	if project == "" || orgRef == "" {
+		http.Error(w, "project and org required", http.StatusBadRequest)
+		return
+	}
+	o, err := s.st.OrgBySlug(orgRef)
+	if err != nil {
+		s.renderOrgs(w, r, map[string]any{"Error": err.Error()})
+		return
+	}
+	if err := s.st.AssignProjectToOrg(project, o.ID); err != nil {
+		s.renderOrgs(w, r, map[string]any{"Error": err.Error()})
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	s.renderOrgs(w, r, map[string]any{"Flash": "Moved " + project + " into " + o.Name})
+}
+
 func (s *server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	t := parseToolbar(r.URL.Query())
 	hours := t.Hours()
@@ -957,10 +1091,14 @@ func (s *server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	scope := s.projectScope(t)
 	if t.Project == "" {
 		rows := make([]ProjectRow, 0, len(summaries))
 		cards := make([]ProjectCard, 0, len(summaries))
 		for _, sm := range summaries {
+			if scope != nil && !scope[sm.Summary.Project] {
+				continue
+			}
 			rows = append(rows, ProjectRow{Summary: sm.Summary, Trend: sm.Trend})
 			cards = append(cards, s.projectCard(sm, hours, t.Env))
 		}
@@ -1043,6 +1181,15 @@ func (s *server) renderKeys(w http.ResponseWriter, r *http.Request, extra map[st
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+	if scope := s.projectScope(t); scope != nil {
+		scoped := make([]store.Project, 0, len(projects))
+		for _, p := range projects {
+			if scope[p.Key] {
+				scoped = append(scoped, p)
+			}
+		}
+		projects = scoped
 	}
 	data["ProjectRows"] = projects
 	for k, v := range extra {

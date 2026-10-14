@@ -169,6 +169,7 @@ summary::marker{color:var(--faint)}
     <a href="{{tl .Toolbar "/performance"}}"{{if eq .Nav "performance"}} class="active"{{end}}>Performance</a>
     <a href="{{tl .Toolbar "/queries"}}"{{if eq .Nav "queries"}} class="active"{{end}}>Queries</a>
     <a href="{{tl .Toolbar "/jobs"}}"{{if eq .Nav "jobs"}} class="active"{{end}}>Jobs</a>
+    <a href="{{tl .Toolbar "/orgs"}}"{{if eq .Nav "orgs"}} class="active"{{end}}>Orgs</a>
     <a href="{{tl .Toolbar "/keys"}}"{{if eq .Nav "keys"}} class="active"{{end}}>Keys</a>
   </nav>
   {{with .Projects}}{{if gt (len .) 0}}
@@ -182,6 +183,11 @@ summary::marker{color:var(--faint)}
 {{if .Nav}}<div class="toolbar">
   <form method="get" action="{{.Path}}">
     {{if .Tab}}<input type="hidden" name="tab" value="{{.Tab}}">{{end}}
+    <span class="label">org</span>
+    <select name="org">
+      <option value="">all orgs</option>
+      {{range .Orgs}}<option value="{{.Slug}}"{{if eq $.Toolbar.Org .Slug}} selected{{end}}>{{.Name}}</option>{{end}}
+    </select>
     <span class="label">project</span>
     <select name="project">
       <option value="">all projects</option>

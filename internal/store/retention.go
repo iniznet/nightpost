@@ -106,5 +106,5 @@ func (s *Store) RunRetention(days int, keepProfiles int) (string, error) {
 	if rows, err := s.wdb.Query(`PRAGMA wal_checkpoint(TRUNCATE)`); err == nil {
 		rows.Close()
 	}
-	return fmt.Sprintf("retention: pruned %d old + %d over-cap occurrences + %d alerts, profiles kept <= %d", n1, n2, n3, keepProfiles), nil
+	return fmt.Sprintf("retention: pruned %d old + %d over-cap occurrences + %d alerts, profiles kept <= %d per project", n1, n2, n3, keepProfiles), nil
 }
