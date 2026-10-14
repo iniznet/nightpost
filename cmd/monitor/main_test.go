@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/iniznet/fenrirealm-monitor/internal/store"
+	"github.com/iniznet/fenrirealm-monitor/internal/web"
 )
 
 // TestReadyHandlerReportsOK pins the readiness contract's shape.
@@ -22,8 +23,15 @@ func TestReadyHandlerReportsOK(t *testing.T) {
 	}
 	defer st.Close()
 
+	// M6.10: the machine-readable leg also carries the ingest-rejection
+	// counters, so a monitor can alert on them without scraping the UI.
+	health := web.IngestHealth{
+		ShaperRejections: func() int64 { return 7 },
+		GateRefusals:     func() int64 { return 3 },
+		UnknownAdmits:    func() int64 { return 2 },
+	}
 	rec := httptest.NewRecorder()
-	readyHandler(st)(rec, httptest.NewRequest(http.MethodGet, "/ready", nil))
+	readyHandler(st, health)(rec, httptest.NewRequest(http.MethodGet, "/ready", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("got %d, want 200", rec.Code)
 	}
@@ -37,6 +45,16 @@ func TestReadyHandlerReportsOK(t *testing.T) {
 	if _, ok := body["revision"]; !ok {
 		t.Error("readiness must report the build revision")
 	}
+	ingest, ok := body["ingest"].(map[string]any)
+	if !ok {
+		t.Fatalf("no ingest counters in the readiness payload: %v", body)
+	}
+	for key, want := range map[string]float64{"shaper_rejections": 7, "gate_refusals": 3, "unknown_admits": 2} {
+		if got, ok := ingest[key].(float64); !ok || got != want {
+			t.Errorf("ingest.%s = %v, want %v", key, ingest[key], want)
+		}
+	}
+
 	// Unauthenticated: it must never carry tenant figures.
 	for _, banned := range []string{"projects", "unsigned_projects", "users"} {
 		if _, ok := body[banned]; ok {
@@ -57,7 +75,7 @@ func TestReadyHandlerReportsStoreFailure(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	readyHandler(st)(rec, httptest.NewRequest(http.MethodGet, "/ready", nil))
+	readyHandler(st, web.IngestHealth{})(rec, httptest.NewRequest(http.MethodGet, "/ready", nil))
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("closed store: got %d, want 503", rec.Code)
 	}

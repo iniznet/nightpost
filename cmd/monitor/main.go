@@ -37,6 +37,7 @@ func main() {
 	ingressGlobalBurst := flag.Float64("ingress-global-burst", 1000, "M6.10 coarse ingest burst across all projects")
 	ingressIPRate := flag.Float64("ingress-ip-rate", 100, "M6.10 coarse ingest ceiling per source address, events/s (0 disables — the right setting behind a reverse proxy, where every request shares the proxy address)")
 	ingressIPBurst := flag.Float64("ingress-ip-burst", 200, "M6.10 coarse per-source-address burst")
+	requireRegistered := flag.Bool("require-registered", false, "refuse an ingest POST that names a project nobody registered (401) instead of auto-provisioning it; MANDATORY with a public ingress, and the product build flips the default to true at fork time")
 	maxAutoProjects := flag.Int("max-auto-projects", 500, "max projects auto-provisioned from unsigned ingest before a NEW name is refused (0 = unbounded)")
 	requireIngestKeys := flag.Bool("require-ingest-keys", false, "refuse unsigned ingest entirely — set this once ingest is reachable through a public ingress")
 	sessionSecret := flag.String("session-secret", "", "HMAC key for dashboard session cookies (empty = random per boot; sessions die on restart)")
@@ -76,6 +77,7 @@ func main() {
 	sh := ingest.NewShaper(*ingestRate, *ingestBurst)
 	gate := ingest.NewKeyGate(st, 5*time.Second)
 	gate.ConfigureAutoProvision(*maxAutoProjects, *requireIngestKeys)
+	gate.RequireRegistered(*requireRegistered)
 	guard := ingest.NewIngressGuard(*ingressGlobalRate, *ingressGlobalBurst, *ingressIPRate, *ingressIPBurst)
 	cors := ingest.NewCORSResolver(*corsOrigin, st.ProjectCORSOrigin, 30*time.Second)
 	if *resetAdmin != "" {
@@ -158,15 +160,20 @@ func main() {
 	// so both stay minimal — status, db and the build revision, never a tenant
 	// count or anything else an unauthenticated caller should not learn.
 	mux.HandleFunc("GET /up", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	mux.HandleFunc("GET /ready", readyHandler(st))
-	web.Register(mux, st, gate, auth, web.WithIngestHealth(web.IngestHealth{
+	// M6.10 exposes the ingest-rejection counters on the machine-readable
+	// health leg as well as the footer strip. They ride /ready, not /up: /up
+	// must stay trivial (M6.5), because a liveness probe that does work can get
+	// a container restarted into the same condition.
+	health := web.IngestHealth{
 		ShaperRejections:  sh.Rejections,
 		KeyGateRejections: gate.Rejections,
 		UnknownAdmits:     gate.UnknownAdmits,
 		GateRefusals:      gate.Refusals,
 		GuardGlobal:       guard.GlobalRejections,
 		GuardIP:           guard.IPRejections,
-	}), web.WithCORSInvalidator(cors), web.WithSettingDefaults(store.SettingDefaults{
+	}
+	mux.HandleFunc("GET /ready", readyHandler(st, health))
+	web.Register(mux, st, gate, auth, web.WithIngestHealth(health), web.WithCORSInvalidator(cors), web.WithSettingDefaults(store.SettingDefaults{
 		RetentionDays:        *retentionDays,
 		PruneIntervalMinutes: pruneMinutes(*pruneInterval),
 		OccurrenceCap:        *occurrenceCap,
@@ -256,10 +263,26 @@ func randomSessionSecret() ([]byte, error) {
 // readyHandler is the readiness leg of the health contract: 200 when the
 // store answers a real query, 503 carrying the error when it does not. It is a
 // function rather than an inline closure so both branches are testable.
-func readyHandler(st *store.Store) http.HandlerFunc {
+func readyHandler(st *store.Store, h web.IngestHealth) http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		payload := map[string]any{"status": "ok", "db": "ok", "revision": buildRevision()}
+		// Aggregate counters only — still no tenant figure, because this leg is
+		// unauthenticated. A nil accessor (the zero IngestHealth) is skipped
+		// rather than dereferenced, so the handler is safe to construct bare.
+		ingestCounters := map[string]any{}
+		addCounter := func(name string, f func() int64) {
+			if f != nil {
+				ingestCounters[name] = f()
+			}
+		}
+		addCounter("shaper_rejections", h.ShaperRejections)
+		addCounter("keygate_rejections", h.KeyGateRejections)
+		addCounter("gate_refusals", h.GateRefusals)
+		addCounter("unknown_admits", h.UnknownAdmits)
+		addCounter("guard_global_rejections", h.GuardGlobal)
+		addCounter("guard_ip_rejections", h.GuardIP)
+
+		payload := map[string]any{"status": "ok", "db": "ok", "revision": buildRevision(), "ingest": ingestCounters}
 		if err := st.Ping(); err != nil {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			payload["status"] = "unavailable"

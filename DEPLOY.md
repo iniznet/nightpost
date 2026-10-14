@@ -124,13 +124,23 @@ server {
 ### Mandatory once ingest is public
 
 ```sh
--require-ingest-keys
+-require-registered      # a POST cannot MINT a project by naming it
+-require-ingest-keys     # a project that has a key must present it
 ```
 
-Unsigned ingest then answers 401: with the surface public, an unauthenticated
-POST that auto-provisions a project is an open door, and the bounded
-auto-provision budget exists to make the flood pointless — not to make unsigned
-ingest safe.
+Together these close the two halves of the same door. `-require-registered`
+answers **401** to a project nobody registered, so the caller-chosen `{project}`
+name stops being a resource the attacker allocates; `-require-ingest-keys`
+answers **401** to unsigned traffic on projects that have a key. Neither breaks
+a running producer: a project that already exists without a key stays admitted
+(that is the Expand/Contract path), and only *new* names are refused.
+
+Prefer `-require-registered` first if you must stage the change — it is the
+narrower refusal, and the bounded auto-provision budget exists to make a flood
+pointless rather than to make unsigned ingest safe. The product build flips
+`-require-registered`'s default to on at fork time; this repo keeps it off by
+default so deploying an existing install never changes its ingress posture
+without an operator saying so.
 
 Then tune the ceilings for the real traffic shape:
 
@@ -139,6 +149,7 @@ Then tune the ceilings for the real traffic shape:
 | `-ingress-global-rate` / `-ingress-global-burst` | ceiling across **all** projects. A DoS ceiling, not a fairness limit — set it well above real aggregate volume |
 | `-ingress-ip-rate` / `-ingress-ip-burst` | per source address. **Set `-ingress-ip-rate 0` behind a proxy**, where every request shares the proxy address |
 | `-max-auto-projects` | how many unsigned projects may be auto-provisioned at all |
+| `-require-registered` | refuse a project nobody registered, instead of auto-provisioning it |
 | `-ingest-rate` / `-ingest-burst` | per-project fairness budget |
 
 `X-Forwarded-For` is deliberately **not** trusted: the header is caller-

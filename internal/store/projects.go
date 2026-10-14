@@ -119,6 +119,15 @@ func (s *Store) RevokeIngestKey(key string) error {
 	return nil
 }
 
+// ProjectExists reports whether a project row exists. The M6.10
+// registration-required mode asks before it would auto-provision a name, so a
+// caller-chosen project cannot be created by an ingest POST.
+func (s *Store) ProjectExists(key string) (bool, error) {
+	var n int
+	err := s.rdb.QueryRow(`SELECT COUNT(*) FROM projects WHERE key = ?`, key).Scan(&n)
+	return n > 0, err
+}
+
 // ProjectCORSOrigin returns the project's browser-origin allowlist; "" means
 // the install default applies and an unknown project is reported as "" too.
 func (s *Store) ProjectCORSOrigin(key string) (string, error) {
