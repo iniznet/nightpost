@@ -29,6 +29,12 @@ func main() {
 	occurrenceCap := flag.Int("occurrence-cap", 30, "max occurrence rows stored per issue fingerprint per minute (0 = unlimited)")
 	ingestRate := flag.Float64("ingest-rate", 50, "ingest events per second allowed per project before 429")
 	ingestBurst := flag.Float64("ingest-burst", 100, "ingest burst ceiling per project")
+	ingressGlobalRate := flag.Float64("ingress-global-rate", 500, "M6.10 coarse ingest ceiling across ALL projects, events/s")
+	ingressGlobalBurst := flag.Float64("ingress-global-burst", 1000, "M6.10 coarse ingest burst across all projects")
+	ingressIPRate := flag.Float64("ingress-ip-rate", 100, "M6.10 coarse ingest ceiling per source address, events/s (0 disables — the right setting behind a reverse proxy, where every request shares the proxy address)")
+	ingressIPBurst := flag.Float64("ingress-ip-burst", 200, "M6.10 coarse per-source-address burst")
+	maxAutoProjects := flag.Int("max-auto-projects", 500, "max projects auto-provisioned from unsigned ingest before a NEW name is refused (0 = unbounded)")
+	requireIngestKeys := flag.Bool("require-ingest-keys", false, "refuse unsigned ingest entirely — set this once ingest is reachable through a public ingress")
 	sessionSecret := flag.String("session-secret", "", "HMAC key for dashboard session cookies (empty = random per boot; sessions die on restart)")
 	resetAdmin := flag.String("reset-admin", "", "one-shot: reset (or create) this admin email's password, print a fresh one, and exit")
 	alertsConfig := flag.String("alerts-config", "", "path to alerts JSON (channels + rules); empty = alerting disabled")
@@ -62,6 +68,8 @@ func main() {
 	mon := &ingest.Monolog{Store: st}
 	sh := ingest.NewShaper(*ingestRate, *ingestBurst)
 	gate := ingest.NewKeyGate(st, 5*time.Second)
+	gate.ConfigureAutoProvision(*maxAutoProjects, *requireIngestKeys)
+	guard := ingest.NewIngressGuard(*ingressGlobalRate, *ingressGlobalBurst, *ingressIPRate, *ingressIPBurst)
 	if *resetAdmin != "" {
 		email := strings.ToLower(strings.TrimSpace(*resetAdmin))
 		pw, rerr := st.ResetAdminPassword(email)
@@ -100,21 +108,30 @@ func main() {
 	go retentionLoop(st, *retentionDays, *pruneInterval)
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /ingest/{project}/sentry", ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.PathProject, ingest.SentryHandler(st))))
-	mux.HandleFunc("POST /ingest/{project}/profile", ingest.WithCORS(*corsOrigin, ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.PathProject, ingest.ProfileHandler(st)))))
-	mux.HandleFunc("POST /ingest/{project}/error", ingest.WithCORS(*corsOrigin, ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.PathProject, ingest.ErrorHandler(st)))))
-	mux.HandleFunc("POST /ingest/{project}/xhprof", ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.XHProfProject, ingest.XHProfHandler(st))))
-	mux.HandleFunc("POST /ingest/{project}/query", ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.PathProject, ingest.QueryHandler(st))))
-	mux.HandleFunc("POST /ingest/{project}/job", ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.PathProject, ingest.JobHandler(st))))
-	mux.HandleFunc("POST /ingest/{project}/release", ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.PathProject, ingest.ReleaseHandler(st))))
+	// M6.10 route order: coarse guard → key gate → per-project shaper →
+	// handler. The guard is OUTERMOST because a {project}-name flood must be
+	// throttled before any key lookup or DB work, and its ceiling is keyed on
+	// nothing the caller picks. The shaper is INNERMOST because its bucket is
+	// keyed on that chosen name — it can only ever be a per-tenant fairness
+	// limit, never the DoS ceiling.
+	chain := func(project func(*http.Request) string, next http.HandlerFunc) http.HandlerFunc {
+		return ingest.WithIngressGuard(guard, ingest.WithKeyGate(gate, project, ingest.WithShaper(sh, next)))
+	}
+	mux.HandleFunc("POST /ingest/{project}/sentry", chain(ingest.PathProject, ingest.SentryHandler(st)))
+	mux.HandleFunc("POST /ingest/{project}/profile", ingest.WithCORS(*corsOrigin, chain(ingest.PathProject, ingest.ProfileHandler(st))))
+	mux.HandleFunc("POST /ingest/{project}/error", ingest.WithCORS(*corsOrigin, chain(ingest.PathProject, ingest.ErrorHandler(st))))
+	mux.HandleFunc("POST /ingest/{project}/xhprof", chain(ingest.XHProfProject, ingest.XHProfHandler(st)))
+	mux.HandleFunc("POST /ingest/{project}/query", chain(ingest.PathProject, ingest.QueryHandler(st)))
+	mux.HandleFunc("POST /ingest/{project}/job", chain(ingest.PathProject, ingest.JobHandler(st)))
+	mux.HandleFunc("POST /ingest/{project}/release", chain(ingest.PathProject, ingest.ReleaseHandler(st)))
 	// Sentry SDK compatibility: sentry-laravel POSTs envelopes to /api/{id}/store.
-	mux.HandleFunc("POST /api/{project}/store", ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.PathProject, ingest.SentryHandler(st))))
-	mux.HandleFunc("POST /api/{project}/store/", ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.PathProject, ingest.SentryHandler(st))))
-	mux.HandleFunc("POST /api/{project}/envelope", ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.PathProject, ingest.SentryHandler(st))))
+	mux.HandleFunc("POST /api/{project}/store", chain(ingest.PathProject, ingest.SentryHandler(st)))
+	mux.HandleFunc("POST /api/{project}/store/", chain(ingest.PathProject, ingest.SentryHandler(st)))
+	mux.HandleFunc("POST /api/{project}/envelope", chain(ingest.PathProject, ingest.SentryHandler(st)))
 	// spiral-packages/profiler compatibility: PROFILER_ENDPOINT posts here
 	// (project key = HTTP Basic username, e.g. http://backend@monitor:8000/...).
-	mux.HandleFunc("POST /api/profiler/store", ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.XHProfProject, ingest.XHProfHandler(st))))
-	mux.HandleFunc("POST /api/{project}/profiler/store", ingest.WithShaper(sh, ingest.WithKeyGate(gate, ingest.XHProfProject, ingest.XHProfHandler(st))))
+	mux.HandleFunc("POST /api/profiler/store", chain(ingest.XHProfProject, ingest.XHProfHandler(st)))
+	mux.HandleFunc("POST /api/{project}/profiler/store", chain(ingest.XHProfProject, ingest.XHProfHandler(st)))
 	// Browser preflight for the first-party reporter endpoints.
 	mux.HandleFunc("OPTIONS /ingest/{project}/error", ingest.PreflightHandler(*corsOrigin))
 	mux.HandleFunc("OPTIONS /ingest/{project}/profile", ingest.PreflightHandler(*corsOrigin))
@@ -123,6 +140,9 @@ func main() {
 		ShaperRejections:  sh.Rejections,
 		KeyGateRejections: gate.Rejections,
 		UnknownAdmits:     gate.UnknownAdmits,
+		GateRefusals:      gate.Refusals,
+		GuardGlobal:       guard.GlobalRejections,
+		GuardIP:           guard.IPRejections,
 	}), web.WithSettingDefaults(store.SettingDefaults{
 		RetentionDays:        *retentionDays,
 		PruneIntervalMinutes: pruneMinutes(*pruneInterval),

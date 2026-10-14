@@ -261,6 +261,16 @@ type IngestHealth struct {
 	ShaperRejections  func() int64
 	KeyGateRejections func() int64
 	UnknownAdmits     func() int64
+	GateRefusals      func() int64
+	GuardGlobal       func() int64
+	GuardIP           func() int64
+}
+
+// configured reports whether any counter is attached, so the footer can omit
+// the strip entirely instead of rendering a row of zeros nobody wired.
+func (h IngestHealth) configured() bool {
+	return h.ShaperRejections != nil || h.KeyGateRejections != nil || h.UnknownAdmits != nil ||
+		h.GateRefusals != nil || h.GuardGlobal != nil || h.GuardIP != nil
 }
 
 // IngestHealthSnapshot is the rendered form of IngestHealth.
@@ -268,6 +278,9 @@ type IngestHealthSnapshot struct {
 	Shaper429     int64
 	KeyGate401    int64
 	UnknownAdmits int64
+	Refusals      int64
+	Global429     int64
+	IP429         int64
 }
 
 func (h IngestHealth) Snapshot() IngestHealthSnapshot {
@@ -280,6 +293,15 @@ func (h IngestHealth) Snapshot() IngestHealthSnapshot {
 	}
 	if h.UnknownAdmits != nil {
 		s.UnknownAdmits = h.UnknownAdmits()
+	}
+	if h.GateRefusals != nil {
+		s.Refusals = h.GateRefusals()
+	}
+	if h.GuardGlobal != nil {
+		s.Global429 = h.GuardGlobal()
+	}
+	if h.GuardIP != nil {
+		s.IP429 = h.GuardIP()
 	}
 	return s
 }
@@ -634,7 +656,7 @@ func (s *server) baseData(r *http.Request, t toolbar, page Page) map[string]any 
 		"Path":     r.URL.Path,
 		"Tab":      r.URL.Query().Get("tab"),
 	}
-	if s.health.ShaperRejections != nil || s.health.KeyGateRejections != nil || s.health.UnknownAdmits != nil {
+	if s.health.configured() {
 		data["Health"] = s.health.Snapshot()
 	}
 	if stats := s.storeStats(); stats != nil {

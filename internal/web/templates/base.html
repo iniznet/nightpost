@@ -211,7 +211,7 @@ summary::marker{color:var(--faint)}
 {{block "content" .}}{{end}}
 </main>
 <footer class="health">
-  {{with .Health}}<span class="faint">ingest · <b>{{.Shaper429}}</b> shaper 429 · <b>{{.KeyGate401}}</b> key 401 · <b>{{.UnknownAdmits}}</b> unsigned admits</span>{{end}}
+  {{with .Health}}<span class="faint">ingest · <b>{{.Global429}}</b> global 429 · <b>{{.IP429}}</b> ip 429 · <b>{{.Shaper429}}</b> project 429 · <b>{{.KeyGate401}}</b> key 401 · <b>{{.Refusals}}</b> refused · <b>{{.UnknownAdmits}}</b> unsigned admits</span>{{end}}
   {{with .StoreStats}}<span class="faint">store · {{.Issues}} issues · {{.Occurrences}} occurrences · {{.Profiles}} profiles · {{mb .DBBytes}} · {{.DroppedOccurrences}} dropped by ingest cap</span>{{end}}
 </footer>
 </body>

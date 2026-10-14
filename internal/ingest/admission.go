@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"net/http"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -12,13 +13,33 @@ import (
 // never translate into unbounded store writes. Requests past the budget get
 // a cheap 429 before any body read or DB work.
 type Shaper struct {
-	rate  float64 // tokens per second
-	burst float64
+	rate       float64 // tokens per second
+	burst      float64
+	maxBuckets int
 
 	rejected atomic.Int64
 
 	mu      sync.Mutex
 	buckets map[string]*tokenBucket
+}
+
+// maxShaperBuckets bounds the per-project bucket map (M6.10). The map is keyed
+// on a name the caller chooses, so without a cap a distinct-name flood grows
+// it without limit even while every request is being throttled.
+const maxShaperBuckets = 4096
+
+// take refills a token bucket and consumes one token.
+func take(b *tokenBucket, rate, burst float64, now time.Time) bool {
+	b.tokens += now.Sub(b.last).Seconds() * rate
+	b.last = now
+	if b.tokens > burst {
+		b.tokens = burst
+	}
+	if b.tokens < 1 {
+		return false
+	}
+	b.tokens--
+	return true
 }
 
 // Rejections reports how many ingest events were answered 429 — the footer
@@ -39,7 +60,7 @@ func NewShaper(perSecond, burst float64) *Shaper {
 	if burst <= 0 {
 		burst = 100
 	}
-	return &Shaper{rate: perSecond, burst: burst, buckets: map[string]*tokenBucket{}}
+	return &Shaper{rate: perSecond, burst: burst, maxBuckets: maxShaperBuckets, buckets: map[string]*tokenBucket{}}
 }
 
 // Allow reports whether one ingest event for the project fits its budget.
@@ -49,19 +70,38 @@ func (sh *Shaper) Allow(project string) bool {
 	defer sh.mu.Unlock()
 	b := sh.buckets[project]
 	if b == nil {
+		sh.evictBucketsLocked()
 		b = &tokenBucket{tokens: sh.burst, last: now}
 		sh.buckets[project] = b
 	}
-	b.tokens += now.Sub(b.last).Seconds() * sh.rate
-	b.last = now
-	if b.tokens > sh.burst {
-		b.tokens = sh.burst
+	return take(b, sh.rate, sh.burst, now)
+}
+
+// evictBucketsLocked drops the least-recently-seen half of the bucket map once
+// it reaches its cap, so a distinct-name flood cannot grow it without limit.
+func (sh *Shaper) evictBucketsLocked() {
+	if len(sh.buckets) < sh.maxBuckets {
+		return
 	}
-	if b.tokens < 1 {
-		return false
+	type entry struct {
+		key  string
+		last time.Time
 	}
-	b.tokens--
-	return true
+	all := make([]entry, 0, len(sh.buckets))
+	for k, b := range sh.buckets {
+		all = append(all, entry{k, b.last})
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].last.Before(all[j].last) })
+	for i := 0; i < len(all)/2; i++ {
+		delete(sh.buckets, all[i].key)
+	}
+}
+
+// BucketCount reports the live bucket-map size; the M6.10 test asserts the bound.
+func (sh *Shaper) BucketCount() int {
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
+	return len(sh.buckets)
 }
 
 // WithShaper rejects requests whose project has exhausted its ingest budget

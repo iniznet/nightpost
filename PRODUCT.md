@@ -93,6 +93,19 @@ org's profiles and traces). Dashboard accounts get a role per org
 dashboard and keys pages; the org hierarchy is NOT an authentication
 boundary yet — role enforcement lands with M6.3's settings pages.
 
+## Ingress posture (M6.10)
+
+Ingest is safe behind the docker network, but it is hardened for public
+ingress because one property cannot be relied on forever: the `{project}` path
+segment is chosen by the caller. Three ceilings make a distinct-name flood
+pointless — a **global** ceiling across all projects, a **per-source-address**
+ceiling, and a **bounded** auto-provision budget (past `-max-auto-projects` a
+new unsigned name is refused instead of minting a project row).
+`-require-ingest-keys` turns unsigned ingest off entirely for a deployment
+exposed through a reverse proxy. `X-Forwarded-For` is deliberately not
+trusted, so behind a proxy the operator sets `-ingress-ip-rate 0` and the
+global ceiling does the work. The footer strip counts every leg.
+
 ## Access posture
 
 The dashboard is auth-gated by an HMAC session cookie with first-run `/setup`

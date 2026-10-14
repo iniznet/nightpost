@@ -44,9 +44,36 @@ type KeyGate struct {
 	entries map[string]keyEntry
 	seen    sync.Map
 
+	// maxAuto bounds first-sight unsigned admission (M6.10); 0 keeps the
+	// legacy unbounded behaviour. requireKeys refuses unsigned ingest wholly —
+	// the endgame posture once ingest sits behind a public ingress.
+	maxAuto     int
+	requireKeys bool
+
 	rejected      atomic.Int64
 	unknownAdmits atomic.Int64
+	refused       atomic.Int64
 }
+
+// projectCounter is optional: a ProjectKeyStore that can count its unsigned
+// projects lets the gate bound auto-provisioning. Kept SEPARATE from
+// ProjectKeyStore so existing fixtures stay valid.
+type projectCounter interface {
+	UnsignedProjectCount() (int, error)
+}
+
+// ConfigureAutoProvision bounds first-sight unsigned admission: past
+// maxProjects unsigned projects a NEW name is refused instead of
+// auto-provisioned, and requireKeys refuses unsigned ingest entirely. Both
+// exist because the {project} name is chosen by the caller.
+func (g *KeyGate) ConfigureAutoProvision(maxProjects int, requireKeys bool) {
+	g.maxAuto = maxProjects
+	g.requireKeys = requireKeys
+}
+
+// Refusals reports first-sight unsigned projects the cap or requireKeys
+// refused — the health strip's answer to "why is my data missing?".
+func (g *KeyGate) Refusals() int64 { return g.refused.Load() }
 
 // Rejections reports ingest requests answered 401 for a missing/wrong key.
 func (g *KeyGate) Rejections() int64 { return g.rejected.Load() }
@@ -155,7 +182,24 @@ func WithKeyGate(g *KeyGate, resolveProject func(*http.Request) string, next htt
 			next(w, r)
 			return
 		}
-		if _, loaded := g.seen.LoadOrStore(project, true); !loaded {
+		// First sight of an unsigned project: the name was chosen by the
+		// caller, so admission is BOUNDED rather than automatic (M6.10).
+		if _, known := g.seen.Load(project); !known {
+			if g.requireKeys {
+				g.refused.Add(1)
+				http.Error(w, "ingest keys required", http.StatusUnauthorized)
+				return
+			}
+			if g.maxAuto > 0 {
+				if c, ok := g.store.(projectCounter); ok {
+					if n, err := c.UnsignedProjectCount(); err == nil && n >= g.maxAuto {
+						g.refused.Add(1)
+						http.Error(w, "auto-provision limit reached — issue an ingest key at /keys", http.StatusTooManyRequests)
+						return
+					}
+				}
+			}
+			g.seen.Store(project, true)
 			g.unknownAdmits.Add(1)
 			if err := g.store.EnsureProject(project); err != nil {
 				log.Printf("keygate: ensure project %q: %v", project, err)
