@@ -21,6 +21,12 @@ jobs:
         run: go vet ./...
       - name: test
         run: go test ./...
+      # The Windows dev host has no C compiler, so -race cannot run there
+      # ("-race requires cgo"). Ubuntu runners have one, which is why the race
+      # detector lives HERE: the keygate's bounded set, the shaper buckets and
+      # the gate itself are shared mutable state on the ingest hot path.
+      - name: race
+        run: go test -race ./...
       # The shipped binary is static (CGO off) — assert that here, or the
       # Dockerfile's alpine runtime stage would fail only at release time.
       - name: static build
