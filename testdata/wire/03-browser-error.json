@@ -1,0 +1,22 @@
+{
+  "spec": 1,
+  "name": "browser-error",
+  "transport": "http",
+  "route": "POST /ingest/{project}/error",
+  "project": "wire",
+  "headers": { "content-type": "application/json", "origin": "https://wire.example.com" },
+  "body": {
+    "message": "wire: Cannot read properties of undefined",
+    "stack": "TypeError: wire: Cannot read properties of undefined\n    at /app/routes/chapters/[id]/+page.svelte:42",
+    "url": "https://wire.example.com/chapters/1",
+    "route": "/chapters/[id]",
+    "environment": "production",
+    "release": "2026.10.9-a1b2c3"
+  },
+  "expect": {
+    "status": 200,
+    "assert": "issue",
+    "exception_class": "JSError",
+    "message": "wire: Cannot read properties of undefined"
+  }
+}

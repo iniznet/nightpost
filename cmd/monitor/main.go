@@ -40,6 +40,7 @@ func main() {
 	maxAutoProjects := flag.Int("max-auto-projects", 500, "max projects auto-provisioned from unsigned ingest before a NEW name is refused (0 = unbounded)")
 	requireIngestKeys := flag.Bool("require-ingest-keys", false, "refuse unsigned ingest entirely — set this once ingest is reachable through a public ingress")
 	sessionSecret := flag.String("session-secret", "", "HMAC key for dashboard session cookies (empty = random per boot; sessions die on restart)")
+	cookieSecure := flag.Bool("cookie-secure", false, "mark the session cookie Secure; set this when TLS terminates at a reverse proxy, because the connection to this server is then plain HTTP and cannot be auto-detected")
 	sessionSecretFile := flag.String("session-secret-file", "", "file holding the session key (0600); loaded when -session-secret is empty, and a generated key is PERSISTED there so sessions survive restarts")
 	resetAdmin := flag.String("reset-admin", "", "one-shot: reset (or create) this admin email's password, write it to a 0600 file, and exit — never printed to the log")
 	resetAdminOut := flag.String("reset-admin-out", "", "where -reset-admin writes the minted password (default <db-dir>/admin-reset.txt, mode 0600)")
@@ -113,6 +114,7 @@ func main() {
 		log.Printf("alerts: dispatcher armed (%d channels, %d rules)", len(acfg.Channels), len(acfg.Rules))
 	}
 	auth := web.NewAuth(st, secret)
+	auth.SetCookieSecure(*cookieSecure)
 	go func() {
 		if err := mon.ListenAndServe(*sockAddr); err != nil {
 			log.Printf("monolog socket stopped: %v", err)

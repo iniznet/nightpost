@@ -1,0 +1,28 @@
+{
+  "spec": 1,
+  "name": "xhprof-callgraph",
+  "transport": "http",
+  "route": "POST /ingest/{project}/xhprof",
+  "project": "wire",
+  "headers": {
+    "content-type": "application/json",
+    "traceparent": "00-11111111111111111111111111111111-00f067aa0ba902b7-01"
+  },
+  "body": {
+    "profile": {
+      "main()": { "ct": 1, "wt": 500000 },
+      "main()==>App\\Foo::slow": { "ct": 1, "wt": 400000 }
+    },
+    "tags": { "env": "production", "host": "node-1" },
+    "app_name": "wire",
+    "hostname": "node-1",
+    "date": 1728300000
+  },
+  "expect": {
+    "status": 200,
+    "assert": "profile",
+    "trace": "11111111111111111111111111111111",
+    "count": 1,
+    "type": "callgraph"
+  }
+}

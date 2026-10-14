@@ -1,0 +1,14 @@
+{
+  "spec": 1,
+  "name": "release-marker",
+  "transport": "http",
+  "route": "POST /ingest/{project}/release",
+  "project": "wire",
+  "headers": { "content-type": "application/json" },
+  "body": { "version": "2026.10.9-a1b2c3", "environment": "production" },
+  "expect": {
+    "status": 202,
+    "assert": "release",
+    "version": "2026.10.9-a1b2c3"
+  }
+}

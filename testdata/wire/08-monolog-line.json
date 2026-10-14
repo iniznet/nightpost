@@ -1,0 +1,20 @@
+{
+  "spec": 1,
+  "name": "monolog-line",
+  "transport": "tcp",
+  "route": "TCP :9913 (newline-delimited JSON)",
+  "project": "wire",
+  "body": {
+    "project_key": "wire",
+    "channel": "security",
+    "level_name": "info",
+    "message": "wire: Turnstile verification rejected",
+    "context": { "error-codes": "invalid-input-response" },
+    "environment": "production"
+  },
+  "expect": {
+    "assert": "log",
+    "channel": "security",
+    "level": "info"
+  }
+}

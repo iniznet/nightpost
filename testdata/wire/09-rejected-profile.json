@@ -1,0 +1,13 @@
+{
+  "spec": 1,
+  "name": "rejected-profile",
+  "transport": "http",
+  "route": "POST /ingest/{project}/profile",
+  "project": "wire",
+  "headers": { "content-type": "application/json" },
+  "body": { "name": "", "duration_ms": 0 },
+  "expect": {
+    "status": 400,
+    "assert": "none"
+  }
+}

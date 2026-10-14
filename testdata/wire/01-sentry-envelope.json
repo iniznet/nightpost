@@ -1,0 +1,19 @@
+{
+  "spec": 1,
+  "name": "sentry-envelope",
+  "transport": "http",
+  "route": "POST /ingest/{project}/sentry",
+  "project": "wire",
+  "headers": { "content-type": "application/x-sentry-envelope" },
+  "body_lines": [
+    "{\"event_id\":\"wire-e1\",\"environment\":\"production\"}",
+    "{\"type\":\"event\"}",
+    "{\"level\":\"error\",\"exception\":{\"values\":[{\"type\":\"QueryException\",\"value\":\"wire: user 42 not found\",\"stacktrace\":{\"frames\":[{\"module\":\"App\\\\Http\\\\Controllers\",\"function\":\"index\"}]}}]}}"
+  ],
+  "expect": {
+    "status": 200,
+    "assert": "issue",
+    "exception_class": "QueryException",
+    "message": "wire: user 42 not found"
+  }
+}

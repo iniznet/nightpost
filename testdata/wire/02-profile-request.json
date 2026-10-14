@@ -1,0 +1,30 @@
+{
+  "spec": 1,
+  "name": "profile-request",
+  "transport": "http",
+  "route": "POST /ingest/{project}/profile",
+  "project": "wire",
+  "headers": {
+    "content-type": "application/json",
+    "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+  },
+  "body": {
+    "name": "GET /chapters/1",
+    "duration_ms": 124,
+    "environment": "production",
+    "type": "request",
+    "spans": [
+      { "name": "db", "duration_ms": 61, "start_ms": 0 },
+      { "name": "render", "duration_ms": 38, "start_ms": 61 }
+    ]
+  },
+  "expect": {
+    "status": 200,
+    "assert": "profile",
+    "trace": "4bf92f3577b34da6a3ce929d0e0e4736",
+    "count": 1,
+    "type": "request",
+    "name": "GET /chapters/1",
+    "duration_ms": 124
+  }
+}
