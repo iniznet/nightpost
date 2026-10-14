@@ -6,6 +6,24 @@ public.
 
 ## Install (one machine, docker)
 
+### From the published image
+
+The release pipeline publishes a multi-arch (amd64 + arm64) image to GHCR on
+every `v*` tag — `ghcr.io/iniznet/fenrirealm-monitor`. To use it instead of
+building locally, point compose at the image:
+
+```yaml
+services:
+  monitor:
+    image: ghcr.io/iniznet/fenrirealm-monitor:latest
+    # ...the rest of docker-compose.yml unchanged
+```
+
+`latest` only ever moves on a tag, never on a push to `main`. A non-public
+package needs `docker login ghcr.io` once on the host.
+
+### From source
+
 ```sh
 git clone <repo> && cd fenrirealm-monitor
 printf 'APP_ENV=production\n' > .env
