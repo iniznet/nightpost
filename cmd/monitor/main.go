@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -147,7 +149,14 @@ func main() {
 	// Browser preflight for the first-party reporter endpoints.
 	mux.HandleFunc("OPTIONS /ingest/{project}/error", ingest.PreflightSource(cors.OriginFor))
 	mux.HandleFunc("OPTIONS /ingest/{project}/profile", ingest.PreflightSource(cors.OriginFor))
+	// Health contract (M6.5). /up is LIVENESS — the process answers, and it
+	// deliberately never touches the database, so a sick store cannot get the
+	// container killed and restarted into the same sickness. /ready is
+	// READINESS: the store must answer a real query. Both are unauthenticated,
+	// so both stay minimal — status, db and the build revision, never a tenant
+	// count or anything else an unauthenticated caller should not learn.
 	mux.HandleFunc("GET /up", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	mux.HandleFunc("GET /ready", readyHandler(st))
 	web.Register(mux, st, gate, auth, web.WithIngestHealth(web.IngestHealth{
 		ShaperRejections:  sh.Rejections,
 		KeyGateRejections: gate.Rejections,
@@ -240,6 +249,43 @@ func randomSessionSecret() ([]byte, error) {
 		return nil, fmt.Errorf("session secret entropy: %w", err)
 	}
 	return []byte(hex.EncodeToString(raw)), nil
+}
+
+// readyHandler is the readiness leg of the health contract: 200 when the
+// store answers a real query, 503 carrying the error when it does not. It is a
+// function rather than an inline closure so both branches are testable.
+func readyHandler(st *store.Store) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		payload := map[string]any{"status": "ok", "db": "ok", "revision": buildRevision()}
+		if err := st.Ping(); err != nil {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			payload["status"] = "unavailable"
+			// The error text is safe here: it names the store, never a tenant.
+			payload["db"] = err.Error()
+		}
+		_ = json.NewEncoder(w).Encode(payload)
+	}
+}
+
+// buildRevision reports the binary's VCS revision for the readiness payload,
+// so "which build is actually deployed?" is answerable from the endpoint
+// rather than by guessing at image tags (M6.5).
+func buildRevision() string {
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		for _, s := range bi.Settings {
+			if s.Key == "vcs.revision" {
+				if len(s.Value) > 12 {
+					return s.Value[:12]
+				}
+				if s.Value == "" {
+					return "dev"
+				}
+				return s.Value
+			}
+		}
+	}
+	return "dev"
 }
 
 func logDBGuard(dbPath string) {

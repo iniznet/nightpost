@@ -1,11 +1,74 @@
 package main
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"github.com/iniznet/fenrirealm-monitor/internal/store"
 )
+
+// TestReadyHandlerReportsOK pins the readiness contract's shape.
+// BuildRevision must always be present so "which build is deployed?" is
+// answerable from the endpoint (M6.5).
+func TestReadyHandlerReportsOK(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer st.Close()
+
+	rec := httptest.NewRecorder()
+	readyHandler(st)(rec, httptest.NewRequest(http.MethodGet, "/ready", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200", rec.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if body["status"] != "ok" || body["db"] != "ok" {
+		t.Errorf("payload = %v", body)
+	}
+	if _, ok := body["revision"]; !ok {
+		t.Error("readiness must report the build revision")
+	}
+	// Unauthenticated: it must never carry tenant figures.
+	for _, banned := range []string{"projects", "unsigned_projects", "users"} {
+		if _, ok := body[banned]; ok {
+			t.Errorf("readiness leaks %q to an unauthenticated caller", banned)
+		}
+	}
+}
+
+// TestReadyHandlerReportsStoreFailure is the half that matters: a readiness
+// probe reporting 200 while the store is gone is worse than none at all.
+func TestReadyHandlerReportsStoreFailure(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	readyHandler(st)(rec, httptest.NewRequest(http.MethodGet, "/ready", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("closed store: got %d, want 503", rec.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if body["status"] != "unavailable" {
+		t.Errorf("status = %v, want unavailable", body["status"])
+	}
+}
 
 // TestResolveSessionSecretPersistsAcrossRestarts is the M6.5 installer
 // contract: the old random-per-boot default silently logged every admin out on

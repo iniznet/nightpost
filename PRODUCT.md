@@ -110,6 +110,28 @@ them wrong is silent rather than loud:
   `-cors-origin` is only the seed for a row that is empty. A wildcard is
   refused: these routes accept unauthenticated browser posts.
 
+### Health contract
+
+Two endpoints, two different jobs — pointing a check at the wrong one is the
+usual way this goes wrong:
+
+| Endpoint | Kind | Checks | Answers |
+|---|---|---|---|
+| `GET /up` | liveness | nothing but "the process answers" | always `200` |
+| `GET /ready` | readiness | a real database query | `200 {"status":"ok","db":"ok","revision":"…"}` or `503` with the error |
+
+`/up` never touches the database on purpose: a container whose database is
+briefly unavailable should not be killed and restarted into the same problem.
+Gate traffic on `/ready`; restart on `/up`.
+
+### Joining traces without a Nightpost client
+
+Point any OpenTelemetry-instrumented service at an ingest route and propagate
+the W3C `traceparent` header — no SDK, no payload field. Precedence is the
+payload's own `trace_id`, then `X-Monitor-Trace-Id`, then `traceparent`. A
+malformed `traceparent` is ignored rather than guessed at, so it can never
+group unrelated requests under one key.
+
 ## Ingress posture (M6.10)
 
 Ingest is safe behind the docker network, but it is hardened for public

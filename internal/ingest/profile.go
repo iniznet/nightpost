@@ -61,7 +61,7 @@ func ProfileHandler(st *store.Store) http.HandlerFunc {
 		id, err := st.RecordProfile(store.ProfileInput{
 			ProjectKey: projectKey, Type: payload.Type, Name: payload.Name,
 			DurationMs: payload.DurationMs, Environment: payload.Environment,
-			TraceID: payload.TraceID,
+			TraceID: TraceIDFromRequest(r, payload.TraceID),
 			Spans:   spans, Hotspots: hotspots,
 			Tree: SanitizeTree(payload.Tree, payload.DurationMs),
 		})

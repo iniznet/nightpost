@@ -272,6 +272,14 @@ func migrate(db *sql.DB) error {
 	return nil
 }
 
+// Ping reports whether the read pool answers. The readiness probe needs a
+// real query rather than a cached handle, because a store whose file vanished
+// still hands out connections (M6.5).
+func (s *Store) Ping() error {
+	var one int
+	return s.rdb.QueryRow(`SELECT 1`).Scan(&one)
+}
+
 func (s *Store) Close() error {
 	err := s.wdb.Close()
 	if err2 := s.rdb.Close(); err == nil {
