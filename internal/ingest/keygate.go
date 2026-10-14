@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/iniznet/fenrirealm-monitor/internal/store"
@@ -42,7 +43,17 @@ type KeyGate struct {
 	mu      sync.Mutex
 	entries map[string]keyEntry
 	seen    sync.Map
+
+	rejected      atomic.Int64
+	unknownAdmits atomic.Int64
 }
+
+// Rejections reports ingest requests answered 401 for a missing/wrong key.
+func (g *KeyGate) Rejections() int64 { return g.rejected.Load() }
+
+// UnknownAdmits reports first-sight auto-provisioned unsigned projects. A
+// rising figure on a public ingress is the M6.10 attack signature.
+func (g *KeyGate) UnknownAdmits() int64 { return g.unknownAdmits.Load() }
 
 func NewKeyGate(st ProjectKeyStore, ttl time.Duration) *KeyGate {
 	return &KeyGate{store: st, ttl: ttl, entries: map[string]keyEntry{}}
@@ -137,6 +148,7 @@ func WithKeyGate(g *KeyGate, resolveProject func(*http.Request) string, next htt
 		if want != "" {
 			presented := presentedKey(r)
 			if presented == "" || !constantTimeEqual(want, store.HashIngestKey(presented)) {
+				g.rejected.Add(1)
 				http.Error(w, "invalid ingest key", http.StatusUnauthorized)
 				return
 			}
@@ -144,6 +156,7 @@ func WithKeyGate(g *KeyGate, resolveProject func(*http.Request) string, next htt
 			return
 		}
 		if _, loaded := g.seen.LoadOrStore(project, true); !loaded {
+			g.unknownAdmits.Add(1)
 			if err := g.store.EnsureProject(project); err != nil {
 				log.Printf("keygate: ensure project %q: %v", project, err)
 			}

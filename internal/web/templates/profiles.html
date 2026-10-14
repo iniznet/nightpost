@@ -1,43 +1,53 @@
-{{define "title"}}Profiles — fenrirealm-monitor{{end}}
+{{define "title"}}Endpoints — fenrirealm-monitor{{end}}
+{{define "subtabs"}}
+<div class="tabs">
+  <a href="{{tl .Toolbar "/performance"}}" class="tab{{if or (eq .Page "performance") (eq .Page "profiles")}} on{{end}}">Endpoints</a>
+  <a href="{{tl .Toolbar "/performance" "tab" "traces"}}" class="tab{{if eq .Page "traces"}} on{{end}}">Traces</a>
+  <a href="{{tl .Toolbar "/performance" "tab" "hotspots"}}" class="tab{{if eq .Page "slowest"}} on{{end}}">Hotspots</a>
+</div>
+{{end}}
 {{define "content"}}
-<h1>Profiles</h1>
+<h1>Endpoints</h1>
 <div class="filterbar">
   <span class="label">type</span>
-  <a href="?project={{.Project}}{{if eq .View "raw"}}&view=raw{{end}}{{if .Q}}&q={{urlquery .Q}}{{end}}" class="pill{{if eq .TypeF ""}} on{{end}}">all</a>
-  <a href="?project={{.Project}}&type=request{{if eq .View "raw"}}&view=raw{{end}}{{if .Q}}&q={{urlquery .Q}}{{end}}" class="pill{{if eq .TypeF "request"}} on{{end}}">request</a>
-  <a href="?project={{.Project}}&type=callgraph{{if eq .View "raw"}}&view=raw{{end}}{{if .Q}}&q={{urlquery .Q}}{{end}}" class="pill{{if eq .TypeF "callgraph"}} on{{end}}">callgraph</a>
+  <a href="{{tl .Toolbar .Path "type" "" "view" .View "q" .Q}}" class="pill{{if eq .TypeF ""}} on{{end}}">all</a>
+  <a href="{{tl .Toolbar .Path "type" "request" "view" .View "q" .Q}}" class="pill{{if eq .TypeF "request"}} on{{end}}">request</a>
+  <a href="{{tl .Toolbar .Path "type" "callgraph" "view" .View "q" .Q}}" class="pill{{if eq .TypeF "callgraph"}} on{{end}}">callgraph</a>
 {{if .Routes}}
   <span class="label">view</span>
-  <a href="?project={{.Project}}&type={{.TypeF}}" class="pill on">aggregated</a>
-  <a href="?project={{.Project}}&type={{.TypeF}}&view=raw" class="pill">raw list</a>
-  <span class="faint">last 24h · sorted by total time</span>
+  <a href="{{tl .Toolbar .Path "type" .TypeF "q" .Q}}" class="pill on">aggregated</a>
+  <a href="{{tl .Toolbar .Path "type" .TypeF "view" "raw" "q" .Q}}" class="pill">raw samples</a>
+  <span class="faint">route rows → the raw samples behind them</span>
 {{else}}
   <span class="label">view</span>
-  <a href="?project={{.Project}}{{if .TypeF}}&type={{.TypeF}}{{end}}" class="pill on">raw list</a>
-  {{if .TypeF}}<a href="?project={{.Project}}&type={{.TypeF}}" class="pill">aggregated</a>{{end}}
+  <a href="{{tl .Toolbar .Path "type" .TypeF "view" "raw" "q" .Q}}" class="pill on">raw samples</a>
+  {{if .TypeF}}<a href="{{tl .Toolbar .Path "type" .TypeF "q" .Q}}" class="pill">aggregated</a>{{end}}
 {{end}}
 </div>
 {{if .Routes}}
 <table>
-<thead><tr><th>Route</th><th>Count</th><th>Total</th><th>Avg</th><th>p95</th><th>Max</th><th>Last seen</th></tr></thead>
+<thead><tr><th>Route</th><th>Count</th><th>p50</th><th>p95</th><th>Total</th><th>Avg</th><th>Max</th><th>Last seen</th></tr></thead>
 <tbody>
 {{range .Routes}}
 <tr>
-  <td><a href="?project={{$.Project}}&type={{$.TypeF}}&view=raw&q={{urlquery .Name}}" title="show raw samples for this route">{{.Name}}</a></td>
+  <td><a href="{{tl $.Toolbar $.Path "type" $.TypeF "view" "raw" "q" .Name}}" title="raw samples for this route">{{.Name}}</a></td>
   <td class="num">{{.Count}}</td>
-  <td class="num"><span class="inline-bar"><span class="fill hot-fill" style="width:{{pct .TotalMs $.MaxTotal}}%"></span></span><span class="mono">{{ms .TotalMs}}</span></td>
-  <td class="num">{{ms .AvgMs}}</td>
-  <td class="num">{{ms .P95Ms}}</td>
-  <td class="num">{{ms .MaxMs}}</td>
-  <td class="dim" title="{{.LastSeen.Format "2006-01-02 15:04:05"}}">{{rel .LastSeen}}</td>
+  <td class="num">{{if .P50Ms}}{{ms .P50Ms}}{{else}}—{{end}}</td>
+  <td class="num nowrap">{{ms .P95Ms}}</td>
+  <td class="num nowrap"><span class="inline-bar"><span class="fill hot-fill" style="width:{{pct .TotalMs $.MaxTotal}}%"></span></span><span class="mono">{{ms .TotalMs}}</span></td>
+  <td class="num nowrap">{{ms .AvgMs}}</td>
+  <td class="num nowrap">{{ms .MaxMs}}</td>
+  <td class="dim nowrap">{{rel .LastSeen}}</td>
 </tr>
 {{end}}
 </tbody>
 </table>
-<p class="faint">Aggregates cover the most recent 20,000 samples of the window.</p>
+<p class="faint">Aggregates cover the most recent 20,000 request samples inside the selected range.</p>
 {{else}}
-<form class="filterbar" method="get" action="/profiles">
-  <input type="hidden" name="project" value="{{.Project}}">
+<form class="filterbar" method="get" action="{{.Path}}">
+  <input type="hidden" name="project" value="{{.Toolbar.Project}}">
+  <input type="hidden" name="range" value="{{.Toolbar.Range}}">
+  <input type="hidden" name="env" value="{{.Toolbar.Env}}">
   {{if .TypeF}}<input type="hidden" name="type" value="{{.TypeF}}">{{end}}
   <input type="hidden" name="view" value="raw">
   <input type="search" name="q" value="{{.Q}}" placeholder="Search route names">
@@ -52,11 +62,11 @@
   <td><a href="/profiles/{{.ID}}">{{.Name}}</a>{{if .TraceID}} <a class="faint" href="/traces/{{.TraceID}}" title="cross-service waterfall">trace</a>{{end}}</td>
   <td><span class="badge">{{.Type}}</span></td>
   <td class="dim">{{.ProjectKey}}</td>
-  <td class="num"><span class="inline-bar"><span class="fill" style="width:{{pct .DurationMs $.MaxDur}}%"></span></span><span class="mono">{{ms .DurationMs}}</span></td>
+  <td class="num nowrap"><span class="inline-bar"><span class="fill" style="width:{{pct .DurationMs $.MaxDur}}%"></span></span><span class="mono">{{ms .DurationMs}}</span></td>
   <td class="dim">{{or .Environment "—"}}</td>
   <td class="num">{{len .Spans}}</td>
   <td class="num">{{len .Hotspots}}</td>
-  <td class="dim" title="{{.CreatedAt.Format "2006-01-02 15:04:05"}}">{{rel .CreatedAt}}</td>
+  <td class="dim nowrap" title="{{.CreatedAt.Format "2006-01-02 15:04:05"}}">{{rel .CreatedAt}}</td>
 </tr>
 {{end}}
 </tbody>

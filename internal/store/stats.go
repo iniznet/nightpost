@@ -169,6 +169,78 @@ func (s *Store) RequestStats(project string, hours int) (count int64, p50, p95 f
 	return count, p50, p95, routes, nil
 }
 
+// LatencyDelta is the p95 of the current window beside the p95 of the
+// equal-length window immediately before it — the "is it getting worse?"
+// figure the dashboard triage cards render.
+type LatencyDelta struct {
+	Now  float64
+	Prev float64
+}
+
+// DeltaPct is the relative change in percent; 0 when there is no baseline.
+func (d LatencyDelta) DeltaPct() float64 {
+	if d.Prev <= 0 {
+		return 0
+	}
+	return (d.Now - d.Prev) / d.Prev * 100
+}
+
+// RequestP95Delta computes the trailing-window p95 beside the p95 of the
+// preceding equal-length window for one project. The read is bounded to the
+// two windows and capped at maxStatsRows, so it stays an index range rather
+// than a table scan.
+func (s *Store) RequestP95Delta(project string, hours int) (LatencyDelta, error) {
+	if hours <= 0 || hours > 168 {
+		hours = 24
+	}
+	now := time.Now()
+	rows, err := s.rdb.Query(`SELECT duration_ms, created_at FROM profiles
+		WHERE type = 'request' AND (? = '' OR project_key = ?) AND created_at >= ?
+		ORDER BY created_at DESC LIMIT ?`,
+		project, project, now.Add(-2*time.Duration(hours)*time.Hour).Unix(), maxStatsRows)
+	if err != nil {
+		return LatencyDelta{}, err
+	}
+	defer rows.Close()
+	split := now.Add(-time.Duration(hours) * time.Hour).Unix()
+	var cur, prev []float64
+	for rows.Next() {
+		var ms float64
+		var created int64
+		if err := rows.Scan(&ms, &created); err != nil {
+			return LatencyDelta{}, err
+		}
+		if created >= split {
+			cur = append(cur, ms)
+		} else {
+			prev = append(prev, ms)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return LatencyDelta{}, err
+	}
+	return LatencyDelta{Now: percentile95(cur), Prev: percentile95(prev)}, nil
+}
+
+func percentile95(v []float64) float64 {
+	if len(v) == 0 {
+		return 0
+	}
+	sort.Float64s(v)
+	return v[min(len(v)-1, len(v)*95/100)]
+}
+
+// OpenIssuesSince counts unresolved issues first seen at or after `since`
+// (unix seconds) for one project — the "new since release" triage figure.
+// A zero `since` counts every open issue.
+func (s *Store) OpenIssuesSince(project string, since int64) (int64, error) {
+	var n int64
+	err := s.rdb.QueryRow(`SELECT COUNT(*) FROM issues
+		WHERE resolved = 0 AND (? <= 0 OR first_seen_at >= ?) AND (? = '' OR project_key = ?)`,
+		since, since, project, project).Scan(&n)
+	return n, err
+}
+
 // IssueSparklines returns trailing-hour occurrence buckets per issue id for
 // one batched query (used by the issues list trend column).
 func (s *Store) IssueSparklines(project string, hours int) (map[int64][]int64, error) {

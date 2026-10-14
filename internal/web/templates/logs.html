@@ -1,21 +1,29 @@
 {{define "title"}}Logs — fenrirealm-monitor{{end}}
 {{define "extrahead"}}<meta http-equiv="refresh" content="15">{{end}}
+{{define "subtabs"}}
+<div class="tabs">
+  <a href="{{tl .Toolbar "/errors"}}" class="tab{{if or (eq .Page "errors") (eq .Page "issues")}} on{{end}}">Issues</a>
+  <a href="{{tl .Toolbar "/errors" "tab" "logs"}}" class="tab{{if eq .Page "logs"}} on{{end}}">Logs</a>
+</div>
+{{end}}
 {{define "content"}}
 <h1>Logs</h1>
+<p class="faint">The Monolog stream: one row per channel+level+message fingerprint. <b>Channel</b> is the emitter (Laravel log channel, e.g. <span class="mono">security</span>); <b>env</b> is the deployment the record came from.</p>
 <div class="filterbar">
   <span class="label">level</span>
-  <a href="?project={{.Project}}" class="pill{{if eq .Filter.Level ""}} on{{end}}">all</a>
-  {{range .Levels}}<a href="?project={{$.Project}}&level={{.Level}}" class="pill{{if eq $.Filter.Level .Level}} on{{end}}">{{.Level}} <span class="faint">{{.Count}}</span></a>{{end}}
+  <a href="{{tl .Toolbar .Path}}" class="pill{{if eq .Filter.Level ""}} on{{end}}">all</a>
+  {{range .Levels}}<a href="{{tl $.Toolbar $.Path "level" .Level}}" class="pill{{if eq $.Filter.Level .Level}} on{{end}}">{{.Level}} <span class="faint">{{.Count}}</span></a>{{end}}
 </div>
-<form class="filterbar" method="get" action="/logs">
-  <input type="hidden" name="project" value="{{.Project}}">
+<form class="filterbar" method="get" action="{{.Path}}">
+  {{if .Tab}}<input type="hidden" name="tab" value="{{.Tab}}">{{end}}
+  <input type="hidden" name="project" value="{{.Toolbar.Project}}">
+  <input type="hidden" name="range" value="{{.Toolbar.Range}}">
+  <input type="hidden" name="env" value="{{.Toolbar.Env}}">
   {{if .Filter.Level}}<input type="hidden" name="level" value="{{.Filter.Level}}">{{end}}
-  <input type="search" name="q" value="{{.Filter.Q}}" placeholder="Search messages">
+  <span class="label">channel</span>
   <input name="channel" value="{{.Filter.Channel}}" placeholder="channel">
-  <select name="env">
-    <option value="">env: all</option>
-    {{range .Envs}}<option value="{{.}}"{{if eq . $.Filter.Env}} selected{{end}}>{{.}}</option>{{end}}
-  </select>
+  <span class="label">search</span>
+  <input type="search" name="q" value="{{.Filter.Q}}" placeholder="Search messages">
   <button>Apply</button>
 </form>
 {{if .Issues}}
@@ -25,11 +33,11 @@
 {{range .Issues}}
 <tr>
   <td><a href="/issues/{{.ID}}">{{.Title}}</a></td>
-  <td class="mono dim">{{or .Channel "—"}}</td>
+  <td class="mono dim">{{if .Channel}}{{.Channel}}{{else}}<span class="faint">—</span>{{end}}</td>
   <td><span class="badge lvl-{{.Level}}">{{or .Level "info"}}</span></td>
   <td class="dim">{{or .Environment "—"}}</td>
   <td class="num">{{.Count}}</td>
-  <td class="dim" title="{{.LastSeenAt.Format "2006-01-02 15:04:05"}}">{{rel .LastSeenAt}}</td>
+  <td class="dim nowrap" title="{{.LastSeenAt.Format "2006-01-02 15:04:05"}}">{{rel .LastSeenAt}}</td>
 </tr>
 {{end}}
 </tbody>

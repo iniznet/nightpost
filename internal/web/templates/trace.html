@@ -1,4 +1,11 @@
 {{define "title"}}Trace {{.TraceID}} — fenrirealm-monitor{{end}}
+{{define "subtabs"}}
+<div class="tabs">
+  <a href="{{tl .Toolbar "/performance"}}" class="tab">Endpoints</a>
+  <a href="{{tl .Toolbar "/performance" "tab" "traces"}}" class="tab on">Traces</a>
+  <a href="{{tl .Toolbar "/performance" "tab" "hotspots"}}" class="tab">Hotspots</a>
+</div>
+{{end}}
 {{define "content"}}
 <h1>Trace</h1>
 <p class="faint"><span class="mono">{{.TraceID}}</span> · total <span class="mono">{{ms .Trace.TotalMs}}</span> · {{len .Trace.Legs}} legs · <span title="{{.Trace.FirstSeen.Format "2006-01-02 15:04:05"}}">{{rel .Trace.FirstSeen}}</span></p>
@@ -12,7 +19,7 @@
 <div class="bar-row">
   <div><span class="badge">{{.Project}}</span> <span class="mono">{{.Span}}</span></div>
   <div class="track"><span class="fill hot-fill" style="margin-left:{{.Left}}%;width:{{.Width}}%"></span></div>
-  <div><span class="mono">{{ms .StartMs}}</span> + <span class="mono">{{ms .DurationMs}}</span></div>
+  <div class="nowrap"><span class="mono">{{ms .StartMs}}</span> + <span class="mono">{{ms .DurationMs}}</span></div>
 </div>
 {{end}}
 {{else}}<p class="empty">No spans recorded for this trace.</p>{{end}}
@@ -25,7 +32,7 @@
 <div class="bar-row">
   <div class="mono" title="{{.Function}}">{{.Function}}</div>
   <div class="track"><span class="fill wf-fill" style="width:{{.Width}}%"></span></div>
-  <div><span class="mono">{{ms .SelfMs}}</span>{{if .Calls}} · <span class="mono">{{.Calls}}&times;</span>{{end}}</div>
+  <div class="nowrap"><span class="mono">{{ms .SelfMs}}</span>{{if .Calls}} · <span class="mono">{{.Calls}}&times;</span>{{end}}</div>
 </div>
 {{end}}
 {{end}}

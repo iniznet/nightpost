@@ -73,7 +73,7 @@ func TestRoutesRenderWithData(t *testing.T) {
 
 	resp, _ := http.Get(srv.URL + "/?project=backend")
 	body := readAll(t, resp)
-	for _, want := range []string{"backend", "errors 24h", "GET /chapters/123"} {
+	for _, want := range []string{"backend", "errors (24h)", "GET /chapters/123"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("dashboard missing %q", want)
 		}
@@ -84,8 +84,10 @@ func TestRoutesRenderWithData(t *testing.T) {
 	if !strings.Contains(body, "user 42 not found") {
 		t.Errorf("issues list missing seeded issue; body: %.400s", body)
 	}
-	if !strings.Contains(body, "login failed") {
-		t.Errorf("issues list missing seeded log; body: %.400s", body)
+	// M6.1: the log stream owns its own tab, so a log-type pseudo-issue folds
+	// out of the default error stream (see TestLogPseudoIssuesFoldOutOfIssueStream).
+	if strings.Contains(body, "login failed") {
+		t.Errorf("issues list should fold out log-type rows; body: %.400s", body)
 	}
 
 	resp, _ = http.Get(srv.URL + "/logs?project=backend")

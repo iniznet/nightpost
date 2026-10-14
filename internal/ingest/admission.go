@@ -3,6 +3,7 @@ package ingest
 import (
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -14,9 +15,15 @@ type Shaper struct {
 	rate  float64 // tokens per second
 	burst float64
 
+	rejected atomic.Int64
+
 	mu      sync.Mutex
 	buckets map[string]*tokenBucket
 }
+
+// Rejections reports how many ingest events were answered 429 — the footer
+// ingest-health strip surfaces it so "why is my data missing?" has an answer.
+func (sh *Shaper) Rejections() int64 { return sh.rejected.Load() }
 
 type tokenBucket struct {
 	tokens float64
@@ -70,6 +77,7 @@ func WithShaper(sh *Shaper, next http.HandlerFunc) http.HandlerFunc {
 			project = xhprofProject(r)
 		}
 		if !sh.Allow(project) {
+			sh.rejected.Add(1)
 			w.Header().Set("Retry-After", "1")
 			http.Error(w, "ingest budget exhausted", http.StatusTooManyRequests)
 			return

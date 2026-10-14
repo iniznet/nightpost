@@ -105,7 +105,11 @@ func main() {
 	mux.HandleFunc("OPTIONS /ingest/{project}/error", ingest.PreflightHandler(*corsOrigin))
 	mux.HandleFunc("OPTIONS /ingest/{project}/profile", ingest.PreflightHandler(*corsOrigin))
 	mux.HandleFunc("GET /up", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	web.Register(mux, st, gate, auth)
+	web.Register(mux, st, gate, auth, web.WithIngestHealth(web.IngestHealth{
+		ShaperRejections:  sh.Rejections,
+		KeyGateRejections: gate.Rejections,
+		UnknownAdmits:     gate.UnknownAdmits,
+	}))
 
 	srv := &http.Server{Addr: *httpAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 

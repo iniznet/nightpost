@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/iniznet/fenrirealm-monitor/internal/ingest"
@@ -19,7 +20,47 @@ import (
 //go:embed templates/*.html
 var templateFS embed.FS
 
+// Page identifies the rendered page. The M6.1 IA consolidates pages into two
+// sections (Errors, Performance); a page still names itself so the nav can
+// highlight the section and the tab row can mark the active tab.
 type Page string
+
+const (
+	PageDashboard   Page = "dashboard"
+	PageErrors      Page = "errors"
+	PageIssues      Page = "issues"
+	PageLogs        Page = "logs"
+	PagePerformance Page = "performance"
+	PageProfiles    Page = "profiles"
+	PageSlowest     Page = "slowest"
+	PageTraces      Page = "traces"
+	PageTrace       Page = "trace"
+	PageKeys        Page = "keys"
+	PageQueries     Page = "queries"
+	PageJobs        Page = "jobs"
+	PageLogin       Page = "login"
+	PageSetup       Page = "setup"
+)
+
+// nav derives the top-level nav item from the page so the active class is
+// never re-typed per template (Errors and Performance are one nav item each).
+func (p Page) nav() string {
+	switch p {
+	case PageErrors, PageIssues, PageLogs:
+		return "errors"
+	case PagePerformance, PageProfiles, PageSlowest, PageTraces, PageTrace:
+		return "performance"
+	case PageDashboard:
+		return "dashboard"
+	case PageQueries:
+		return "queries"
+	case PageJobs:
+		return "jobs"
+	case PageKeys:
+		return "keys"
+	}
+	return ""
+}
 
 type issueFilter struct {
 	Type, Level, Env, Channel, Status, Q string
@@ -156,6 +197,20 @@ type ProjectRow struct {
 	Trend   []int64
 }
 
+// ProjectCard is one dashboard triage card: the figures that answer "is this
+// healthy right now?" for a single project, each deep-linking into the Errors
+// or Performance section.
+type ProjectCard struct {
+	Project         string
+	OpenIssues      int64
+	Errors          int64
+	NewSinceRelease int64
+	ReleaseVersion  string
+	P95Ms           float64
+	DeltaPct        float64
+	Trend           []int64
+}
+
 type SpanRow struct {
 	Name       string
 	Left       string
@@ -163,19 +218,61 @@ type SpanRow struct {
 	DurationMs float64
 }
 
-const (
-	PageDashboard Page = "dashboard"
-	PageIssues    Page = "issues"
-	PageLogs      Page = "logs"
-	PageProfiles  Page = "profiles"
-	PageSlowest   Page = "slowest"
-	PageTrace     Page = "trace"
-	PageKeys      Page = "keys"
-	PageQueries   Page = "queries"
-	PageJobs      Page = "jobs"
-	PageLogin     Page = "login"
-	PageSetup     Page = "setup"
-)
+// server holds the dashboard's dependencies and its parsed templates. Handlers
+// are methods so the section dispatchers (Errors, Performance) can delegate to
+// their tab handlers without duplicating logic.
+type server struct {
+	st     *store.Store
+	gate   *ingest.KeyGate
+	health IngestHealth
+
+	dashboard *template.Template
+	issues    *template.Template
+	detail    *template.Template
+	logs      *template.Template
+	profiles  *template.Template
+	profile   *template.Template
+	slowest   *template.Template
+	traces    *template.Template
+	trace     *template.Template
+	keys      *template.Template
+	queries   *template.Template
+	jobs      *template.Template
+
+	mu      sync.Mutex
+	stats   *store.StoreStats
+	statsAt time.Time
+}
+
+// IngestHealth is the live ingest-rejection picture the footer strip renders.
+// Each field is a live reader (never a cached number): a counter that lags is
+// worse than none when the reader is asking "why is my data missing?".
+type IngestHealth struct {
+	ShaperRejections  func() int64
+	KeyGateRejections func() int64
+	UnknownAdmits     func() int64
+}
+
+// IngestHealthSnapshot is the rendered form of IngestHealth.
+type IngestHealthSnapshot struct {
+	Shaper429     int64
+	KeyGate401    int64
+	UnknownAdmits int64
+}
+
+func (h IngestHealth) Snapshot() IngestHealthSnapshot {
+	var s IngestHealthSnapshot
+	if h.ShaperRejections != nil {
+		s.Shaper429 = h.ShaperRejections()
+	}
+	if h.KeyGateRejections != nil {
+		s.KeyGate401 = h.KeyGateRejections()
+	}
+	if h.UnknownAdmits != nil {
+		s.UnknownAdmits = h.UnknownAdmits()
+	}
+	return s
+}
 
 var funcMap = template.FuncMap{
 	"rel":   relTime,
@@ -183,6 +280,8 @@ var funcMap = template.FuncMap{
 	"ms":    fmtMs,
 	"mb":    fmtMB,
 	"fn":    prettifyFn,
+	"tl":    toolbarLink,
+	"delta": func(v float64) string { return fmt.Sprintf("%+.1f%%", v) },
 	"pct":   func(v, max float64) string { return strconv.FormatFloat(pctOf(v, max), 'f', 1, 64) },
 	"trunc": func(s string, n int) string {
 		r := []rune(s)
@@ -263,37 +362,39 @@ func mustLayout(page string) *template.Template {
 	return template.Must(template.New("layout").Funcs(funcMap).ParseFS(templateFS, "templates/base.html", "templates/"+page))
 }
 
-// baseData carries the fields every page needs for the shared layout.
-func baseData(st *store.Store, project string, page Page) map[string]any {
-	projects, err := st.Projects()
-	if err != nil {
-		log.Printf("projects: %v", err)
+// Option configures the page server.
+type Option func(*server)
+
+// WithIngestHealth attaches the live ingest-rejection counters the footer
+// strip renders. Without it the strip shows store figures only.
+func WithIngestHealth(h IngestHealth) Option {
+	return func(s *server) { s.health = h }
+}
+
+// Register mounts the dashboard on the inner page mux (the auth gate wraps
+// every route by construction). auth == nil keeps the dashboard open — the
+// mode tests and pre-M4 dev runs use that.
+func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *Auth, opts ...Option) {
+	s := &server{
+		st:        st,
+		gate:      gate,
+		dashboard: mustLayout("dashboard.html"),
+		issues:    mustLayout("index.html"),
+		detail:    mustLayout("detail.html"),
+		logs:      mustLayout("logs.html"),
+		profiles:  mustLayout("profiles.html"),
+		profile:   mustLayout("profile.html"),
+		slowest:   mustLayout("slowest.html"),
+		traces:    mustLayout("traces.html"),
+		trace:     mustLayout("trace.html"),
+		keys:      mustLayout("keys.html"),
+		queries:   mustLayout("queries.html"),
+		jobs:      mustLayout("jobs.html"),
 	}
-	return map[string]any{"Projects": projects, "Project": project, "Page": page}
-}
+	for _, o := range opts {
+		o(s)
+	}
 
-func parseID(s string) int64 {
-	id, _ := strconv.ParseInt(s, 10, 64)
-	return id
-}
-
-func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *Auth) {
-	dashboardTmpl := mustLayout("dashboard.html")
-	issuesTmpl := mustLayout("index.html")
-	detailTmpl := mustLayout("detail.html")
-	logsTmpl := mustLayout("logs.html")
-	profilesTmpl := mustLayout("profiles.html")
-	profileTmpl := mustLayout("profile.html")
-	slowestTmpl := mustLayout("slowest.html")
-	traceTmpl := mustLayout("trace.html")
-	keysTmpl := mustLayout("keys.html")
-	queriesTmpl := mustLayout("queries.html")
-	jobsTmpl := mustLayout("jobs.html")
-
-	// Pages mount on an inner mux so a single auth gate covers every route
-	// (including future ones) by construction; login/setup/logout and the
-	// open ingest routes stay on the outer mux. auth == nil keeps the
-	// dashboard open — the mode tests and pre-M4 dev runs use.
 	page := http.NewServeMux()
 	if auth != nil {
 		auth.CompileTemplates()
@@ -307,478 +408,716 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *A
 		mux.Handle("/", page)
 	}
 
-	page.HandleFunc("GET /keys", func(w http.ResponseWriter, r *http.Request) {
-		data := baseData(st, r.URL.Query().Get("project"), PageKeys)
-		projects, err := st.ListProjects()
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		data["ProjectRows"] = projects
-		if err := keysTmpl.ExecuteTemplate(w, "layout", data); err != nil {
-			log.Printf("render keys: %v", err)
-		}
+	page.HandleFunc("GET /{$}", s.handleDashboard)
+
+	// Errors section: one nav item, Issues and Logs cross-linked. The legacy
+	// paths keep serving the same handlers (Expand/Contract, M6.1 invariant).
+	page.HandleFunc("GET /errors", s.handleErrors)
+	page.HandleFunc("GET /issues", s.handleIssues)
+	page.HandleFunc("GET /issues/{id}", s.handleIssueDetail)
+	page.HandleFunc("POST /issues/{id}/resolve", s.resolveHandler(true))
+	page.HandleFunc("POST /issues/{id}/reopen", s.resolveHandler(false))
+	page.HandleFunc("GET /logs", s.handleLogs)
+
+	// Performance section: one nav item, Endpoints / Traces / Hotspots tabs.
+	page.HandleFunc("GET /performance", s.handlePerformance)
+	page.HandleFunc("GET /profiles", s.handleProfiles)
+	page.HandleFunc("GET /profiles/{id}", s.handleProfileDetail)
+	page.HandleFunc("GET /traces", s.handleTraces)
+	page.HandleFunc("GET /traces/{id}", s.handleTraceDetail)
+	page.HandleFunc("GET /slowest", s.handleSlowest)
+
+	page.HandleFunc("GET /queries", s.handleQueries)
+	page.HandleFunc("GET /jobs", s.handleJobs)
+	page.HandleFunc("GET /keys", s.handleKeys)
+	page.HandleFunc("POST /keys/rotate", s.handleKeyRotate)
+	page.HandleFunc("POST /keys/revoke", s.handleKeyRevoke)
+}
+
+// baseData builds the shared layout context for the pre-auth pages
+// (login/setup): they carry no request-scoped toolbar to preserve, but the
+// layout still needs the nav state and the range dialect.
+func baseData(st *store.Store, project string, page Page) map[string]any {
+	projects, err := st.Projects()
+	if err != nil {
+		log.Printf("projects: %v", err)
+	}
+	data := map[string]any{
+		"Projects": projects,
+		"Project":  project,
+		"Page":     page,
+		"Nav":      page.nav(),
+		"Toolbar":  toolbar{Project: project, Range: defaultRange},
+		"Ranges":   rangeSpecs,
+		"Envs":     nil,
+		"Path":     "/login",
+		"Tab":      "",
+	}
+	if stats, serr := st.Stats(); serr == nil {
+		data["StoreStats"] = stats
+	}
+	return data
+}
+
+// baseData carries the fields every page needs: the toolbar context, the nav
+// state, the ingest-health strip and the (short-cached) store figures.
+func (s *server) baseData(r *http.Request, t toolbar, page Page) map[string]any {
+	projects, err := s.st.Projects()
+	if err != nil {
+		log.Printf("projects: %v", err)
+	}
+	envs, err := s.st.Environments(t.Project)
+	if err != nil {
+		log.Printf("environments: %v", err)
+	}
+	data := map[string]any{
+		"Projects": projects,
+		"Project":  t.Project,
+		"Page":     page,
+		"Nav":      page.nav(),
+		"Toolbar":  t,
+		"Ranges":   rangeSpecs,
+		"Envs":     envs,
+		"Path":     r.URL.Path,
+		"Tab":      r.URL.Query().Get("tab"),
+	}
+	if s.health.ShaperRejections != nil || s.health.KeyGateRejections != nil || s.health.UnknownAdmits != nil {
+		data["Health"] = s.health.Snapshot()
+	}
+	if stats := s.storeStats(); stats != nil {
+		data["StoreStats"] = stats
+	}
+	return data
+}
+
+// storeStats caches the table counts for a short interval: the footer strip
+// renders on every page, and a per-request COUNT(*) over occurrences would be
+// the wedge class this repo already refuses elsewhere.
+func (s *server) storeStats() *store.StoreStats {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stats != nil && time.Since(s.statsAt) < 30*time.Second {
+		return s.stats
+	}
+	st, err := s.st.Stats()
+	if err != nil {
+		return s.stats
+	}
+	s.stats, s.statsAt = &st, time.Now()
+	return s.stats
+}
+
+func parseID(s string) int64 {
+	id, _ := strconv.ParseInt(s, 10, 64)
+	return id
+}
+
+// handleErrors is the Errors-section dispatcher: Issues is the default tab and
+// an unknown tab resolves to it, never a 404 (M6.1 invariant I2).
+func (s *server) handleErrors(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("tab") == "logs" {
+		s.handleLogs(w, r)
+		return
+	}
+	s.handleIssues(w, r)
+}
+
+// handleIssues renders the error stream. M6.1 folds the log-type
+// pseudo-issues out of the default stream (they live on the Logs tab); an
+// explicit `?type=` request restores them.
+func (s *server) handleIssues(w http.ResponseWriter, r *http.Request) {
+	t := parseToolbar(r.URL.Query())
+	q := r.URL.Query()
+	f := issueFilter{
+		Type:     q.Get("type"),
+		Level:    q.Get("level"),
+		Env:      t.Env,
+		Status:   q.Get("status"),
+		Q:        q.Get("q"),
+		NewSince: q.Get("new_since"),
+	}
+	if !q.Has("type") {
+		f.Type = "error"
+	}
+	if f.Status == "" {
+		f.Status = "open"
+	}
+	// Pain order (count DESC) is the default: a wall of recent one-offs
+	// otherwise buries the recurring noise that actually hurts.
+	f.Sort = q.Get("sort")
+	if f.Sort != "recent" {
+		f.Sort = "pain"
+	}
+	var newSince *store.ReleaseMark
+	if f.NewSince == "release" {
+		newSince, _ = s.st.LatestRelease(t.Project, t.Env)
+	}
+	query := store.IssueQuery{
+		Project: t.Project, Type: f.Type, Level: f.Level, Env: t.Env, Q: f.Q,
+		Status:      f.Status,
+		Sort:        f.Sort,
+		BeforeID:    parseID(q.Get("before")),
+		BeforeCount: parseID(q.Get("beforecount")),
+		Limit:       50,
+	}
+	if newSince != nil {
+		query.SinceFirstSeen = newSince.At.Unix()
+	}
+	issues, err := s.st.Issues(query)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	spark, _ := s.st.IssueSparklines(t.Project, t.Hours())
+	shown := issues
+	if f.Q == "" {
+		shown = collapseNotFound(issues)
+	}
+	page := PageErrors
+	// The legacy path keeps its page identity so the tab still marks Issues.
+	if r.URL.Path == "/issues" {
+		page = PageIssues
+	}
+	data := s.baseData(r, t, page)
+	data["Issues"] = shown
+	data["Spark"] = spark
+	data["Filter"] = f
+	data["NewSince"] = newSince
+	ids := make([]int64, 0, len(shown))
+	for _, is := range shown {
+		ids = append(ids, is.ID)
+	}
+	userCounts, _ := s.st.UserCounts(ids)
+	data["UserCounts"] = userCounts
+	if len(issues) == 50 {
+		v := url.Values{}
+		v.Set("type", f.Type)
+		v.Set("level", f.Level)
+		v.Set("status", f.Status)
+		v.Set("q", f.Q)
+		v.Set("sort", f.Sort)
+		v.Set("new_since", f.NewSince)
+		v.Set("before", strconv.FormatInt(issues[len(issues)-1].ID, 10))
+		v.Set("beforecount", strconv.FormatInt(issues[len(issues)-1].Count, 10))
+		data["NextURL"] = t.Link(r.URL.Path, v)
+	}
+	if err := s.issues.ExecuteTemplate(w, "layout", data); err != nil {
+		log.Printf("render issues: %v", err)
+	}
+}
+
+func (s *server) handleIssueDetail(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "bad id", http.StatusBadRequest)
+		return
+	}
+	issue, err := s.st.Issue(id)
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	occurrences, err := s.st.Occurrences(id, 20)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	t := parseToolbar(r.URL.Query())
+	// The detail link targets the section the row came from (Errors); the
+	// legacy path is preserved so bookmarks keep working.
+	backPath := "/errors"
+	if r.URL.Query().Get("from") == "logs" {
+		backPath = "/errors"
+	}
+	data := s.baseData(r, t, PageErrors)
+	data["Issue"] = issue
+	data["BackPath"] = backPath
+	if mark, merr := s.st.LatestRelease(issue.ProjectKey, issue.Environment); merr == nil && mark != nil && issue.FirstSeenAt.After(mark.At) {
+		data["NewSince"] = mark
+	}
+	uc, _ := s.st.UserCounts([]int64{issue.ID})
+	data["ImpactedUsers"] = uc[issue.ID]
+	data["Views"] = buildOccViews(occurrences)
+	if err := s.detail.ExecuteTemplate(w, "layout", data); err != nil {
+		log.Printf("render detail: %v", err)
+	}
+}
+
+func (s *server) handleLogs(w http.ResponseWriter, r *http.Request) {
+	t := parseToolbar(r.URL.Query())
+	q := r.URL.Query()
+	f := issueFilter{
+		Level:   q.Get("level"),
+		Env:     t.Env,
+		Channel: q.Get("channel"),
+		Q:       q.Get("q"),
+		Status:  "all",
+		Type:    "log",
+	}
+	logs, err := s.st.Issues(store.IssueQuery{
+		Project: t.Project, Type: "log", Level: f.Level, Env: t.Env, Channel: f.Channel, Q: f.Q,
+		Status:   "all",
+		BeforeID: parseID(q.Get("before")),
+		Limit:    50,
 	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	levels, _ := s.st.LogLevels(t.Project)
+	page := PageErrors
+	if r.URL.Path == "/logs" || r.URL.Query().Get("tab") == "logs" {
+		page = PageLogs
+	}
+	data := s.baseData(r, t, page)
+	data["Issues"] = logs
+	data["Filter"] = f
+	data["Levels"] = levels
+	if len(logs) == 50 {
+		v := url.Values{}
+		v.Set("level", f.Level)
+		v.Set("channel", f.Channel)
+		v.Set("q", f.Q)
+		v.Set("before", strconv.FormatInt(logs[len(logs)-1].ID, 10))
+		data["NextURL"] = t.Link(r.URL.Path, v)
+	}
+	if err := s.logs.ExecuteTemplate(w, "layout", data); err != nil {
+		log.Printf("render logs: %v", err)
+	}
+}
 
-	page.HandleFunc("POST /keys/rotate", func(w http.ResponseWriter, r *http.Request) {
-		if err := r.ParseForm(); err != nil {
-			http.Error(w, "malformed form", http.StatusBadRequest)
-			return
-		}
-		if origin := r.Header.Get("Origin"); origin != "" {
-			u, uerr := url.Parse(origin)
-			if uerr != nil || !strings.EqualFold(u.Host, r.Host) {
-				http.Error(w, "cross-origin rotate rejected", http.StatusForbidden)
-				return
-			}
-		}
-		project := strings.TrimSpace(r.FormValue("project"))
-		if project == "" {
-			http.Error(w, "project required", http.StatusBadRequest)
-			return
-		}
-		secret, err := st.RotateIngestKey(project)
+// handlePerformance is the Performance-section dispatcher: Endpoints is the
+// default tab and an unknown tab resolves to it, never a 404.
+func (s *server) handlePerformance(w http.ResponseWriter, r *http.Request) {
+	switch r.URL.Query().Get("tab") {
+	case "traces":
+		s.handleTraces(w, r)
+	case "hotspots":
+		s.handleSlowest(w, r)
+	default:
+		s.handleProfiles(w, r)
+	}
+}
+
+func (s *server) handleProfiles(w http.ResponseWriter, r *http.Request) {
+	t := parseToolbar(r.URL.Query())
+	q := r.URL.Query()
+	typeFilter := q.Get("type")
+	view := q.Get("view")
+	search := q.Get("q")
+	page := PagePerformance
+	if r.URL.Path == "/profiles" {
+		page = PageProfiles
+	}
+	data := s.baseData(r, t, page)
+	data["TypeF"] = typeFilter
+	data["View"] = view
+	data["Q"] = search
+	if view != "raw" && (typeFilter == store.ProfileTypeRequest || typeFilter == store.ProfileTypeCallgraph) {
+		// Aggregated-by-route is the default view: a flat recency list
+		// repeats the same hot route ten times and hides what actually
+		// accumulates wall-clock time.
+		routes, err := s.st.ProfileRouteStats(t.Project, typeFilter, t.Hours(), 50)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		if gate != nil {
-			gate.Invalidate(project)
-		}
-		log.Printf("ingest key rotated for project %q", project)
-		data := baseData(st, project, PageKeys)
-		projects, perr := st.ListProjects()
-		if perr != nil {
-			http.Error(w, perr.Error(), http.StatusInternalServerError)
-			return
-		}
-		data["ProjectRows"] = projects
-		data["NewKey"] = secret
-		data["NewKeyProject"] = project
-		w.Header().Set("Cache-Control", "no-store")
-		if err := keysTmpl.ExecuteTemplate(w, "layout", data); err != nil {
-			log.Printf("render keys: %v", err)
-		}
-	})
-
-	page.HandleFunc("POST /keys/revoke", func(w http.ResponseWriter, r *http.Request) {
-		if err := r.ParseForm(); err != nil {
-			http.Error(w, "malformed form", http.StatusBadRequest)
-			return
-		}
-		if origin := r.Header.Get("Origin"); origin != "" {
-			u, uerr := url.Parse(origin)
-			if uerr != nil || !strings.EqualFold(u.Host, r.Host) {
-				http.Error(w, "cross-origin revoke rejected", http.StatusForbidden)
-				return
+		data["Routes"] = routes
+		var maxTotal float64
+		for _, ra := range routes {
+			if ra.TotalMs > maxTotal {
+				maxTotal = ra.TotalMs
 			}
 		}
-		project := strings.TrimSpace(r.FormValue("project"))
-		if project == "" {
-			http.Error(w, "project required", http.StatusBadRequest)
-			return
-		}
-		if err := st.RevokeIngestKey(project); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if gate != nil {
-			gate.Invalidate(project)
-		}
-		log.Printf("ingest key revoked for project %q", project)
-		data := baseData(st, project, PageKeys)
-		projects, perr := st.ListProjects()
-		if perr != nil {
-			http.Error(w, perr.Error(), http.StatusInternalServerError)
-			return
-		}
-		data["ProjectRows"] = projects
-		data["Revoked"] = project
-		w.Header().Set("Cache-Control", "no-store")
-		if err := keysTmpl.ExecuteTemplate(w, "layout", data); err != nil {
-			log.Printf("render keys: %v", err)
-		}
-	})
-
-	page.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
-		project := r.URL.Query().Get("project")
-		data := baseData(st, project, PageDashboard)
-		summaries, err := st.DashboardSummaries(24)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if project == "" {
-			rows := make([]ProjectRow, 0, len(summaries))
-			for _, s := range summaries {
-				rows = append(rows, ProjectRow{Summary: s.Summary, Trend: s.Trend})
-			}
-			data["All"] = true
-			data["Rows"] = rows
-		} else {
-			var sum store.ProjectSummary
-			var trend []int64
-			for _, s := range summaries {
-				if s.Summary.Project == project {
-					sum, trend = s.Summary, s.Trend
-					break
-				}
-			}
-			recent, err := st.Issues(store.IssueQuery{Project: project, Status: "open", Limit: 8, Sort: "pain"})
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			spark, _ := st.IssueSparklines(project, 24)
-			envs, _ := st.Environments(project)
-			var maxLevel int64
-			for _, lc := range sum.LogLevels {
-				if lc.Count > maxLevel {
-					maxLevel = lc.Count
-				}
-			}
-			data["All"] = false
-			data["Summary"] = sum
-			data["MaxLevel"] = maxLevel
-			data["Trend"] = trend
-			data["Recent"] = recent
-			data["Spark"] = spark
-			data["Envs"] = envs
-		}
-		if stats, serr := st.Stats(); serr == nil {
-			data["StoreStats"] = stats
-		}
-		if top, qerr := st.QueryLeaderboard(project, 24, 5); qerr == nil && len(top) > 0 {
-			data["TopQueries"] = top
-		}
-		if jobs, jerr := st.JobLeaderboard(project, 24, 5); jerr == nil {
-			data["Jobs"] = jobs
-		}
-		if rels, rerr := st.ReleasesWithHealth(project, 5); rerr == nil {
-			data["Releases"] = rels
-		}
-		if err := dashboardTmpl.ExecuteTemplate(w, "layout", data); err != nil {
-			log.Printf("render dashboard: %v", err)
-		}
-	})
-
-	page.HandleFunc("GET /issues", func(w http.ResponseWriter, r *http.Request) {
-		project := r.URL.Query().Get("project")
-		f := issueFilter{
-			Type:     r.URL.Query().Get("type"),
-			Level:    r.URL.Query().Get("level"),
-			Env:      r.URL.Query().Get("env"),
-			Status:   r.URL.Query().Get("status"),
-			Q:        r.URL.Query().Get("q"),
-			NewSince: r.URL.Query().Get("new_since"),
-		}
-		if f.Status == "" {
-			f.Status = "open"
-		}
-		// Pain order (count DESC) is the default: a wall of recent one-offs
-		// otherwise buries the recurring noise that actually hurts.
-		f.Sort = r.URL.Query().Get("sort")
-		if f.Sort != "recent" {
-			f.Sort = "pain"
-		}
-		var newSince *store.ReleaseMark
-		if f.NewSince == "release" {
-			newSince, _ = st.LatestRelease(project, f.Env)
-		}
-		q := store.IssueQuery{
-			Project: project, Type: f.Type, Level: f.Level, Env: f.Env, Q: f.Q,
-			Status:      f.Status,
-			Sort:        f.Sort,
-			BeforeID:    parseID(r.URL.Query().Get("before")),
-			BeforeCount: parseID(r.URL.Query().Get("beforecount")),
-			Limit:       50,
-		}
-		if newSince != nil {
-			q.SinceFirstSeen = newSince.At.Unix()
-		}
-		issues, err := st.Issues(q)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		spark, _ := st.IssueSparklines(project, 24)
-		envs, _ := st.Environments(project)
-		// The per-path 404 family collapses into one row unless the user is
-		// already drilling into it via the title search.
-		shown := issues
-		if f.Q == "" {
-			shown = collapseNotFound(issues)
-		}
-		data := baseData(st, project, PageIssues)
-		data["Issues"] = shown
-		data["Spark"] = spark
-		data["Filter"] = f
-		data["Envs"] = envs
-		data["NewSince"] = newSince
-		ids := make([]int64, 0, len(shown))
-		for _, is := range shown {
-			ids = append(ids, is.ID)
-		}
-		userCounts, _ := st.UserCounts(ids)
-		data["UserCounts"] = userCounts
-		if len(issues) == 50 {
-			v := url.Values{}
-			v.Set("project", project)
-			v.Set("type", f.Type)
-			v.Set("level", f.Level)
-			v.Set("env", f.Env)
-			v.Set("status", f.Status)
-			v.Set("q", f.Q)
-			v.Set("sort", f.Sort)
-			v.Set("new_since", f.NewSince)
-			v.Set("before", strconv.FormatInt(issues[len(issues)-1].ID, 10))
-			v.Set("beforecount", strconv.FormatInt(issues[len(issues)-1].Count, 10))
-			data["NextURL"] = "/issues?" + v.Encode()
-		}
-		if err := issuesTmpl.ExecuteTemplate(w, "layout", data); err != nil {
-			log.Printf("render issues: %v", err)
-		}
-	})
-
-	page.HandleFunc("GET /issues/{id}", func(w http.ResponseWriter, r *http.Request) {
-		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-		if err != nil {
-			http.Error(w, "bad id", http.StatusBadRequest)
-			return
-		}
-		issue, err := st.Issue(id)
-		if err != nil {
-			http.Error(w, "not found", http.StatusNotFound)
-			return
-		}
-		occurrences, err := st.Occurrences(id, 20)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		data := baseData(st, issue.ProjectKey, PageIssues)
-		data["Issue"] = issue
-		if mark, merr := st.LatestRelease(issue.ProjectKey, issue.Environment); merr == nil && mark != nil && issue.FirstSeenAt.After(mark.At) {
-			data["NewSince"] = mark
-		}
-		uc, _ := st.UserCounts([]int64{issue.ID})
-		data["ImpactedUsers"] = uc[issue.ID]
-		data["Views"] = buildOccViews(occurrences)
-		if err := detailTmpl.ExecuteTemplate(w, "layout", data); err != nil {
-			log.Printf("render detail: %v", err)
-		}
-	})
-
-	page.HandleFunc("POST /issues/{id}/resolve", resolveHandler(st, true))
-	page.HandleFunc("POST /issues/{id}/reopen", resolveHandler(st, false))
-
-	page.HandleFunc("GET /logs", func(w http.ResponseWriter, r *http.Request) {
-		project := r.URL.Query().Get("project")
-		f := issueFilter{
-			Level:   r.URL.Query().Get("level"),
-			Env:     r.URL.Query().Get("env"),
-			Channel: r.URL.Query().Get("channel"),
-			Q:       r.URL.Query().Get("q"),
-			Status:  "all",
-			Type:    "log",
-		}
-		logs, err := st.Issues(store.IssueQuery{
-			Project: project, Type: "log", Level: f.Level, Env: f.Env, Channel: f.Channel, Q: f.Q,
-			Status:   "all",
-			BeforeID: parseID(r.URL.Query().Get("before")),
-			Limit:    50,
-		})
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		levels, _ := st.LogLevels(project)
-		envs, _ := st.Environments(project)
-		data := baseData(st, project, PageLogs)
-		data["Issues"] = logs
-		data["Filter"] = f
-		data["Levels"] = levels
-		data["Envs"] = envs
-		if len(logs) == 50 {
-			v := url.Values{}
-			v.Set("project", project)
-			v.Set("level", f.Level)
-			v.Set("env", f.Env)
-			v.Set("channel", f.Channel)
-			v.Set("q", f.Q)
-			v.Set("before", strconv.FormatInt(logs[len(logs)-1].ID, 10))
-			data["NextURL"] = "/logs?" + v.Encode()
-		}
-		if err := logsTmpl.ExecuteTemplate(w, "layout", data); err != nil {
-			log.Printf("render logs: %v", err)
-		}
-	})
-
-	page.HandleFunc("GET /profiles", func(w http.ResponseWriter, r *http.Request) {
-		project := r.URL.Query().Get("project")
-		typeFilter := r.URL.Query().Get("type")
-		view := r.URL.Query().Get("view")
-		q := r.URL.Query().Get("q")
-		data := baseData(st, project, PageProfiles)
-		data["TypeF"] = typeFilter
-		data["View"] = view
-		data["Q"] = q
-		if view != "raw" && (typeFilter == store.ProfileTypeRequest || typeFilter == store.ProfileTypeCallgraph) {
-			// Aggregated-by-route is the default view: a flat recency list
-			// repeats the same hot route ten times and hides what actually
-			// accumulates wall-clock time.
-			routes, err := st.ProfileRouteStats(project, typeFilter, 24, 50)
-			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			data["Routes"] = routes
-			var maxTotal float64
-			for _, ra := range routes {
-				if ra.TotalMs > maxTotal {
-					maxTotal = ra.TotalMs
-				}
-			}
-			data["MaxTotal"] = maxTotal
-			data["Profiles"] = nil
-			if err := profilesTmpl.ExecuteTemplate(w, "layout", data); err != nil {
-				log.Printf("render profiles: %v", err)
-			}
-			return
-		}
-		profiles, err := st.ProfilesFiltered(project, typeFilter, q, 50)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		var maxDur float64
-		for _, p := range profiles {
-			if p.DurationMs > maxDur {
-				maxDur = p.DurationMs
-			}
-		}
-		data["Profiles"] = profiles
-		data["MaxDur"] = maxDur
-		if err := profilesTmpl.ExecuteTemplate(w, "layout", data); err != nil {
+		data["MaxTotal"] = maxTotal
+		data["Profiles"] = nil
+		if err := s.profiles.ExecuteTemplate(w, "layout", data); err != nil {
 			log.Printf("render profiles: %v", err)
 		}
-	})
+		return
+	}
+	profiles, err := s.st.ProfilesFiltered(t.Project, typeFilter, search, 50)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	var maxDur float64
+	for _, p := range profiles {
+		if p.DurationMs > maxDur {
+			maxDur = p.DurationMs
+		}
+	}
+	data["Profiles"] = profiles
+	data["MaxDur"] = maxDur
+	if err := s.profiles.ExecuteTemplate(w, "layout", data); err != nil {
+		log.Printf("render profiles: %v", err)
+	}
+}
 
-	page.HandleFunc("GET /profiles/{id}", func(w http.ResponseWriter, r *http.Request) {
-		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
-		if err != nil {
-			http.Error(w, "bad id", http.StatusBadRequest)
-			return
+func (s *server) handleProfileDetail(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "bad id", http.StatusBadRequest)
+		return
+	}
+	profile, err := s.st.Profile(id)
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	var maxSelf float64
+	for _, h := range profile.Hotspots {
+		if h.SelfMs > maxSelf {
+			maxSelf = h.SelfMs
 		}
-		profile, err := st.Profile(id)
-		if err != nil {
-			http.Error(w, "not found", http.StatusNotFound)
-			return
-		}
-		var maxSelf float64
-		for _, h := range profile.Hotspots {
-			if h.SelfMs > maxSelf {
-				maxSelf = h.SelfMs
-			}
-		}
-		data := baseData(st, profile.ProjectKey, PageProfiles)
-		data["Profile"] = profile
-		data["SpanRows"] = buildSpanRows(profile)
-		data["Tree"] = buildTreeViews(profile.Tree, profile.DurationMs, 0)
-		data["MaxSelf"] = maxSelf
-		if err := profileTmpl.ExecuteTemplate(w, "layout", data); err != nil {
-			log.Printf("render profile: %v", err)
-		}
-	})
+	}
+	t := parseToolbar(r.URL.Query())
+	data := s.baseData(r, t, PagePerformance)
+	data["Profile"] = profile
+	data["SpanRows"] = buildSpanRows(profile)
+	data["Tree"] = buildTreeViews(profile.Tree, profile.DurationMs, 0)
+	data["MaxSelf"] = maxSelf
+	if err := s.profile.ExecuteTemplate(w, "layout", data); err != nil {
+		log.Printf("render profile: %v", err)
+	}
+}
 
-	page.HandleFunc("GET /traces/{id}", func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		legs, err := st.ProfilesByTrace(id, 20)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if len(legs) == 0 {
-			http.Error(w, "not found", http.StatusNotFound)
-			return
-		}
-		data := baseData(st, "", PageTrace)
-		data["Trace"] = buildTraceView(legs)
-		data["TraceID"] = id
-		if err := traceTmpl.ExecuteTemplate(w, "layout", data); err != nil {
-			log.Printf("render trace: %v", err)
-		}
-	})
+// handleTraces renders the Traces index: recent cross-service requests with
+// their leg count, total window and a has-tree badge for the drill-down.
+func (s *server) handleTraces(w http.ResponseWriter, r *http.Request) {
+	t := parseToolbar(r.URL.Query())
+	rows, err := s.st.Traces(t.Project, t.Hours(), 50)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	data := s.baseData(r, t, PageTraces)
+	data["Traces"] = rows
+	data["DeepCap"] = 12
+	if err := s.traces.ExecuteTemplate(w, "layout", data); err != nil {
+		log.Printf("render traces: %v", err)
+	}
+}
 
-	page.HandleFunc("GET /jobs", func(w http.ResponseWriter, r *http.Request) {
-		project := r.URL.Query().Get("project")
-		data := baseData(st, project, PageJobs)
-		aggs, err := st.JobLeaderboard(project, 24*7, 200)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		data["Rows"] = aggs
-		if err := jobsTmpl.ExecuteTemplate(w, "layout", data); err != nil {
-			log.Printf("render jobs: %v", err)
-		}
-	})
+func (s *server) handleTraceDetail(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	legs, err := s.st.ProfilesByTrace(id, 20)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if len(legs) == 0 {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	t := parseToolbar(r.URL.Query())
+	data := s.baseData(r, t, PageTrace)
+	data["Trace"] = buildTraceView(legs)
+	data["TraceID"] = id
+	if err := s.trace.ExecuteTemplate(w, "layout", data); err != nil {
+		log.Printf("render trace: %v", err)
+	}
+}
 
-	page.HandleFunc("GET /queries", func(w http.ResponseWriter, r *http.Request) {
-		project := r.URL.Query().Get("project")
-		data := baseData(st, project, PageQueries)
-		aggs, err := st.QueryLeaderboard(project, 24, 50)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
+// handleSlowest renders the Hotspots tab: proportional self-time bars with an
+// app-vs-framework scope filter and pagination over the bounded sample set.
+func (s *server) handleSlowest(w http.ResponseWriter, r *http.Request) {
+	t := parseToolbar(r.URL.Query())
+	q := r.URL.Query()
+	scope := q.Get("scope")
+	if scope != "app" && scope != "framework" {
+		scope = "all"
+	}
+	pageNum := int(parseID(q.Get("page")))
+	if pageNum < 1 {
+		pageNum = 1
+	}
+	all, err := s.st.SlowestCode(t.Project, 500)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	filtered := make([]store.HotspotAgg, 0, len(all))
+	for _, row := range all {
+		app := isAppFrame(row.Function, row.File)
+		if scope == "app" && !app {
+			continue
 		}
-		type QueryRow struct {
-			SQL, Fingerprint string
-			Connection       string
-			Count            int64
-			TotalMs, AvgMs   float64
-			MaxMs            float64
-			LastSeen         time.Time
+		if scope == "framework" && app {
+			continue
 		}
-		rows := make([]QueryRow, 0, len(aggs))
-		var maxTotal float64
-		for _, a := range aggs {
-			if a.TotalMs > maxTotal {
-				maxTotal = a.TotalMs
-			}
-			avg := 0.0
-			if a.Count > 0 {
-				avg = a.TotalMs / float64(a.Count)
-			}
-			rows = append(rows, QueryRow{SQL: a.SQL, Fingerprint: a.Fingerprint, Connection: a.Connection, Count: a.Count, TotalMs: a.TotalMs, AvgMs: avg, MaxMs: a.MaxMs, LastSeen: a.LastSeen})
+		filtered = append(filtered, row)
+	}
+	const perPage = 50
+	total := len(filtered)
+	start := (pageNum - 1) * perPage
+	if start > total {
+		start = total
+	}
+	end := start + perPage
+	if end > total {
+		end = total
+	}
+	shown := filtered[start:end]
+	var maxSelf float64
+	for _, row := range shown {
+		if row.TotalSelfMs > maxSelf {
+			maxSelf = row.TotalSelfMs
 		}
+	}
+	data := s.baseData(r, t, PageSlowest)
+	data["Rows"] = shown
+	data["MaxSelf"] = maxSelf
+	data["Scope"] = scope
+	data["Total"] = total
+	data["PageNum"] = pageNum
+	if start > 0 {
+		data["PrevURL"] = t.Link(r.URL.Path, url.Values{"scope": {scope}, "page": {strconv.Itoa(pageNum - 1)}})
+	}
+	if end < total {
+		data["NextURL"] = t.Link(r.URL.Path, url.Values{"scope": {scope}, "page": {strconv.Itoa(pageNum + 1)}})
+	}
+	if err := s.slowest.ExecuteTemplate(w, "layout", data); err != nil {
+		log.Printf("render slowest: %v", err)
+	}
+}
+
+// isAppFrame separates first-party frames from vendor/framework frames: a
+// path under vendor/ or node_modules/ is framework, as is a bare framework
+// namespace when the producer sent no file.
+func isAppFrame(fn, file string) bool {
+	f := strings.ToLower(file)
+	if strings.Contains(f, "/vendor/") || strings.Contains(f, "\\vendor\\") ||
+		strings.Contains(f, "/node_modules/") || strings.Contains(f, "\\node_modules\\") {
+		return false
+	}
+	for _, p := range []string{"illuminate\\", "symfony\\", "laravel\\", "monolog\\", "guzzlehttp\\", "predis\\", "doctrine\\", "psr\\", "sentry\\", "composer\\"} {
+		if strings.HasPrefix(strings.ToLower(fn), p) {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *server) handleQueries(w http.ResponseWriter, r *http.Request) {
+	t := parseToolbar(r.URL.Query())
+	data := s.baseData(r, t, PageQueries)
+	aggs, err := s.st.QueryLeaderboard(t.Project, t.Hours(), 50)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	type QueryRow struct {
+		SQL, Fingerprint string
+		Connection       string
+		Count            int64
+		TotalMs, AvgMs   float64
+		MaxMs            float64
+		LastSeen         time.Time
+	}
+	rows := make([]QueryRow, 0, len(aggs))
+	var maxTotal float64
+	for _, a := range aggs {
+		if a.TotalMs > maxTotal {
+			maxTotal = a.TotalMs
+		}
+		avg := 0.0
+		if a.Count > 0 {
+			avg = a.TotalMs / float64(a.Count)
+		}
+		rows = append(rows, QueryRow{SQL: a.SQL, Fingerprint: a.Fingerprint, Connection: a.Connection, Count: a.Count, TotalMs: a.TotalMs, AvgMs: avg, MaxMs: a.MaxMs, LastSeen: a.LastSeen})
+	}
+	data["Rows"] = rows
+	data["MaxTotal"] = maxTotal
+	if err := s.queries.ExecuteTemplate(w, "layout", data); err != nil {
+		log.Printf("render queries: %v", err)
+	}
+}
+
+func (s *server) handleJobs(w http.ResponseWriter, r *http.Request) {
+	t := parseToolbar(r.URL.Query())
+	data := s.baseData(r, t, PageJobs)
+	aggs, err := s.st.JobLeaderboard(t.Project, t.Hours(), 200)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	data["Rows"] = aggs
+	if err := s.jobs.ExecuteTemplate(w, "layout", data); err != nil {
+		log.Printf("render jobs: %v", err)
+	}
+}
+
+func (s *server) handleDashboard(w http.ResponseWriter, r *http.Request) {
+	t := parseToolbar(r.URL.Query())
+	hours := t.Hours()
+	data := s.baseData(r, t, PageDashboard)
+	summaries, err := s.st.DashboardSummaries(hours)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if t.Project == "" {
+		rows := make([]ProjectRow, 0, len(summaries))
+		cards := make([]ProjectCard, 0, len(summaries))
+		for _, sm := range summaries {
+			rows = append(rows, ProjectRow{Summary: sm.Summary, Trend: sm.Trend})
+			cards = append(cards, s.projectCard(sm, hours, t.Env))
+		}
+		data["All"] = true
 		data["Rows"] = rows
-		data["MaxTotal"] = maxTotal
-		if err := queriesTmpl.ExecuteTemplate(w, "layout", data); err != nil {
-			log.Printf("render queries: %v", err)
-		}
-	})
-
-	page.HandleFunc("GET /slowest", func(w http.ResponseWriter, r *http.Request) {
-		project := r.URL.Query().Get("project")
-		rows, err := st.SlowestCode(project, 500)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		var maxSelf float64
-		for _, row := range rows {
-			if row.TotalSelfMs > maxSelf {
-				maxSelf = row.TotalSelfMs
+		data["Cards"] = cards
+	} else {
+		var sum store.ProjectSummary
+		var trend []int64
+		for _, sm := range summaries {
+			if sm.Summary.Project == t.Project {
+				sum, trend = sm.Summary, sm.Trend
+				break
 			}
 		}
-		data := baseData(st, project, PageSlowest)
-		data["Rows"] = rows
-		data["MaxSelf"] = maxSelf
-		if err := slowestTmpl.ExecuteTemplate(w, "layout", data); err != nil {
-			log.Printf("render slowest: %v", err)
+		recent, ierr := s.st.Issues(store.IssueQuery{Project: t.Project, Type: "error", Status: "open", Limit: 8, Sort: "pain"})
+		if ierr != nil {
+			http.Error(w, ierr.Error(), http.StatusInternalServerError)
+			return
 		}
-	})
+		spark, _ := s.st.IssueSparklines(t.Project, hours)
+		var maxLevel int64
+		for _, lc := range sum.LogLevels {
+			if lc.Count > maxLevel {
+				maxLevel = lc.Count
+			}
+		}
+		data["All"] = false
+		data["Summary"] = sum
+		data["MaxLevel"] = maxLevel
+		data["Trend"] = trend
+		data["Recent"] = recent
+		data["Spark"] = spark
+		data["Card"] = s.projectCard(store.DashboardRow{Summary: sum, Trend: trend}, hours, t.Env)
+	}
+	if top, qerr := s.st.QueryLeaderboard(t.Project, hours, 5); qerr == nil && len(top) > 0 {
+		data["TopQueries"] = top
+	}
+	if jobs, jerr := s.st.JobLeaderboard(t.Project, hours, 5); jerr == nil {
+		data["Jobs"] = jobs
+	}
+	if rels, rerr := s.st.ReleasesWithHealth(t.Project, 5); rerr == nil {
+		data["Releases"] = rels
+	}
+	if err := s.dashboard.ExecuteTemplate(w, "layout", data); err != nil {
+		log.Printf("render dashboard: %v", err)
+	}
+}
+
+// projectCard composes one triage card: the release delta, the p95 delta
+// beside the previous equal-length window, and the error sparkline.
+func (s *server) projectCard(row store.DashboardRow, hours int, env string) ProjectCard {
+	card := ProjectCard{
+		Project:    row.Summary.Project,
+		OpenIssues: row.Summary.OpenIssues,
+		Errors:     row.Summary.Errors24,
+		P95Ms:      row.Summary.P95Ms,
+		Trend:      row.Trend,
+	}
+	if mark, err := s.st.LatestRelease(card.Project, env); err == nil && mark != nil {
+		card.ReleaseVersion = mark.Version
+		if n, err := s.st.OpenIssuesSince(card.Project, mark.At.Unix()); err == nil {
+			card.NewSinceRelease = n
+		}
+	}
+	if d, err := s.st.RequestP95Delta(card.Project, hours); err == nil {
+		card.DeltaPct = d.DeltaPct()
+	}
+	return card
+}
+
+func (s *server) handleKeys(w http.ResponseWriter, r *http.Request) {
+	s.renderKeys(w, r, nil)
+}
+
+func (s *server) renderKeys(w http.ResponseWriter, r *http.Request, extra map[string]any) {
+	t := parseToolbar(r.URL.Query())
+	data := s.baseData(r, t, PageKeys)
+	projects, err := s.st.ListProjects()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	data["ProjectRows"] = projects
+	for k, v := range extra {
+		data[k] = v
+	}
+	if err := s.keys.ExecuteTemplate(w, "layout", data); err != nil {
+		log.Printf("render keys: %v", err)
+	}
+}
+
+func (s *server) handleKeyRotate(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "malformed form", http.StatusBadRequest)
+		return
+	}
+	if !sameOrigin(r) {
+		http.Error(w, "cross-origin rotate rejected", http.StatusForbidden)
+		return
+	}
+	project := strings.TrimSpace(r.FormValue("project"))
+	if project == "" {
+		http.Error(w, "project required", http.StatusBadRequest)
+		return
+	}
+	secret, err := s.st.RotateIngestKey(project)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if s.gate != nil {
+		s.gate.Invalidate(project)
+	}
+	log.Printf("ingest key rotated for project %q", project)
+	w.Header().Set("Cache-Control", "no-store")
+	s.renderKeys(w, r, map[string]any{"NewKey": secret, "NewKeyProject": project})
+}
+
+func (s *server) handleKeyRevoke(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "malformed form", http.StatusBadRequest)
+		return
+	}
+	if !sameOrigin(r) {
+		http.Error(w, "cross-origin revoke rejected", http.StatusForbidden)
+		return
+	}
+	project := strings.TrimSpace(r.FormValue("project"))
+	if project == "" {
+		http.Error(w, "project required", http.StatusBadRequest)
+		return
+	}
+	if err := s.st.RevokeIngestKey(project); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if s.gate != nil {
+		s.gate.Invalidate(project)
+	}
+	log.Printf("ingest key revoked for project %q", project)
+	w.Header().Set("Cache-Control", "no-store")
+	s.renderKeys(w, r, map[string]any{"Revoked": project})
+}
+
+// sameOrigin rejects a cross-origin form POST (CSRF hardening for the key
+// actions); an absent Origin header is accepted for same-origin form posts.
+func sameOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(u.Host, r.Host)
 }
 
 // buildSpanRows lays out a request-profile span waterfall. Spans that carry
@@ -1017,22 +1356,22 @@ func buildTreeViews(nodes []store.TreeNode, totalMs float64, depth int) []TreeVi
 
 // resolveHandler flips the resolved bit and redirects back to the issues
 // list preserving the project filter.
-func resolveHandler(st *store.Store, resolved bool) http.HandlerFunc {
+func (s *server) resolveHandler(resolved bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 		if err != nil {
 			http.Error(w, "bad id", http.StatusBadRequest)
 			return
 		}
-		iss, err := st.Issue(id)
-		if err != nil {
+		if _, err := s.st.Issue(id); err != nil {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
-		if err := st.SetResolved(id, resolved); err != nil {
+		if err := s.st.SetResolved(id, resolved); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		http.Redirect(w, r, "/issues?project="+url.QueryEscape(iss.ProjectKey), http.StatusSeeOther)
+		t := parseToolbar(r.URL.Query())
+		http.Redirect(w, r, t.Link("/errors", nil), http.StatusSeeOther)
 	}
 }

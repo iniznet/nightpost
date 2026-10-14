@@ -1,6 +1,12 @@
 {{define "title"}}{{.Issue.Title}} — fenrirealm-monitor{{end}}
+{{define "subtabs"}}
+<div class="tabs">
+  <a href="{{tl .Toolbar "/errors"}}" class="tab on">Issues</a>
+  <a href="{{tl .Toolbar "/errors" "tab" "logs"}}" class="tab">Logs</a>
+</div>
+{{end}}
 {{define "content"}}
-<p><a href="/issues?project={{.Issue.ProjectKey}}">← Issues</a></p>
+<p><a href="{{tl .Toolbar .BackPath}}">← Issues</a></p>
 <h1>{{.Issue.Title}}</h1>
 <p class="meta">
   <span class="badge">{{.Issue.Type}}</span>
@@ -8,7 +14,7 @@
   <span class="badge lvl-{{.Issue.Level}}">{{or .Issue.Level "error"}}</span>
   {{if .Issue.Environment}}<span class="badge">{{.Issue.Environment}}</span>{{end}}
   {{if .NewSince}}<span class="badge">new in {{.NewSince.Version}}</span>{{end}}
-  {{if .Issue.Channel}}<span class="badge mono">{{.Issue.Channel}}</span>{{end}}
+  {{if .Issue.Channel}}<span class="badge mono">channel {{.Issue.Channel}}</span>{{end}}
   <span class="badge">count {{.Issue.Count}}</span>
   {{if .ImpactedUsers}}<span class="badge">{{.ImpactedUsers}} users affected</span>{{end}}
   <span class="faint">first {{rel .Issue.FirstSeenAt}} · last {{rel .Issue.LastSeenAt}}</span>
@@ -20,6 +26,7 @@
   {{else}}
   <form class="inline" method="post" action="/issues/{{.Issue.ID}}/resolve"><button>Resolve</button></form>
   {{end}}
+  {{if eq .Issue.Type "log"}}<a class="faint" href="{{tl .Toolbar "/errors" "tab" "logs" "channel" .Issue.Channel}}">Other logs on this channel →</a>{{end}}
 </div>
 <h2>Recent occurrences</h2>
 {{range .Views}}
