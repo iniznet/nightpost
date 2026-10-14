@@ -93,6 +93,67 @@ org's profiles and traces). Dashboard accounts get a role per org
 dashboard and keys pages; the org hierarchy is NOT an authentication
 boundary yet — role enforcement lands with M6.3's settings pages.
 
+## Scale: the single-node ceiling (M6.4)
+
+Every ingest write serializes through ONE SQLite WAL writer, so "how many apps
+can one binary take?" has a measurable answer rather than a vibe. Measured on
+this repo's benchmark dataset (20,620 issues, 196,500 occurrences, 60,000
+profiles, ~24 MB on disk):
+
+| Operation | Measured |
+|---|---|
+| Ingest writes (profiles) | **6,500-9,500 events/s** (2,000 writes in 219-305ms) |
+| `Issues` (errors, newest 50) | 5ms |
+| `Issues` (logs, newest 50) | 28ms |
+| `IssueTotal` / `LogLevels` | 3.5ms / 9ms |
+| `HourBuckets` (24h, the slowest) | 132ms |
+| `Profiles` (newest 50) | 0.5ms |
+| `Traces` (24h) | 6ms |
+| Full retention cycle | ~2.9s |
+
+Reproduce with `MONITOR_SCALE=1 go test ./internal/store/ -run TestScaleLatency -v`
+(env-gated so CI never pays for it; `MONITOR_SCALE_DB=<path>` writes a real file
+so you can point a server at the same data).
+
+The number to plan with is the **write** ceiling: roughly one order of magnitude
+below 10k events/s on commodity hardware, and it does not improve with more
+cores because there is one writer. That is the honest limit of the
+one-binary-one-file design, and it is far above what a mid-size application
+produces (a 500 req/s app sampling 5% is ~25 events/s). Past it, the answer is
+more instances with different projects, not a bigger instance.
+
+**Hourly rollups were considered and NOT built.** The phase was conditional on
+measured dashboard slowness, and the measurement says the dashboard is fine: one
+query exceeds 100ms, everything else is under 30ms. Materializing hourly buckets
+would have added a write-path cost, a second source of truth and a rebuild job to
+fix a 132ms read. The one slow query was fixed instead by letting it drive from
+`issues` through the covering index already on the table (213ms -> 132ms), after
+measuring that a new index traded 31% of ingest throughput for it and was
+rejected.
+
+## Retention, and what bounds the `issues` table (M6.4)
+
+Retention bounds raw volume by age and by per-issue cap, and now also bounds the
+issue table itself:
+
+- **Occurrences** are deleted past the retention window, and capped per issue so
+  one high-frequency fingerprint cannot flood the table.
+- **Profiles** keep a per-project window, so one noisy project cannot evict
+  another's profiles.
+- **Issues are archived, never deleted.** The defect list is history, so a row
+  whose occurrences retention has already removed, and which has not been seen
+  since, is marked archived: it leaves the live lists and counts, but its count
+  and first-seen date survive. This exists because every distinct log message is
+  an `issues` row — a chatty app produced 20,000 of them in a single day of real
+  volume — so without it the table grows for the life of the install.
+- **An archived issue that RECURS is un-archived** by the next occurrence of the
+  same fingerprint. A one-way archive would hide a returning defect forever,
+  which is worse than an unbounded table.
+- **Archiving never removes a project.** Project discovery reads issues without
+  the archive guard on purpose, so a project whose issues are all archived stays
+  listable at `/keys` — otherwise archiving could lock an operator out of
+  rotating its key.
+
 ## Install posture (M6.5)
 
 Three things a self-hosted install must get right by default, because getting

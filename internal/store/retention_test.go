@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -38,6 +39,82 @@ func TestPruneOccurrencesBefore(t *testing.T) {
 		// Direct occurrence INSERTs never bump issue.count; the seeded count
 		// from RecordError is what must survive pruning.
 		t.Errorf("issue row must survive pruning with count intact, got %+v", issue)
+	}
+}
+
+// TestPruneIssueOccurrencesSpansRanges covers the M6.4 rewrite: the cap must
+// hold per issue ACROSS range boundaries, not merely inside the first chunk.
+func TestPruneIssueOccurrencesSpansRanges(t *testing.T) {
+	st := newTestStore(t)
+
+	const issues = 7
+	const seeded = 5
+	ids := make([]int64, 0, issues)
+	for i := 0; i < issues; i++ {
+		// A distinct fingerprint per issue is what makes these separate issues.
+		id, err := st.RecordError("p", "Ex", "boom", ForException("Ex", "boom", fmt.Sprintf("frame-%d", i)), "prod", "error", nil)
+		if err != nil {
+			t.Fatalf("record: %v", err)
+		}
+		ids = append(ids, id)
+	}
+	for _, id := range ids {
+		seedOccurrences(t, st, id, seeded, 0)
+	}
+	// RecordError already stored one occurrence per issue, so each holds
+	// seeded+1 and the cap of 2 must remove seeded-1 per issue.
+	want := int64(issues * (seeded - 1))
+
+	// chunk=2 forces four ranges over seven issues, so a bug that only prunes
+	// the first range cannot pass.
+	n, err := st.pruneIssueOccurrences(2, 2)
+	if err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	if n != want {
+		t.Errorf("pruned %d rows, want %d", n, want)
+	}
+
+	rows, err := st.rdb.Query(`SELECT issue_id, COUNT(*) FROM occurrences GROUP BY issue_id`)
+	if err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	defer rows.Close()
+	seen := 0
+	for rows.Next() {
+		var id, c int64
+		if err := rows.Scan(&id, &c); err != nil {
+			t.Fatal(err)
+		}
+		seen++
+		if c != 2 {
+			t.Errorf("issue %d kept %d occurrences, want 2", id, c)
+		}
+	}
+	if seen != issues {
+		t.Errorf("found %d issues with occurrences, want %d", seen, issues)
+	}
+}
+
+// TestPruneIssueOccurrencesKeepsNewest pins that the cap keeps the NEWEST rows,
+// which is the entire point of the window's ORDER BY.
+func TestPruneIssueOccurrencesKeepsNewest(t *testing.T) {
+	st := newTestStore(t)
+	id, err := st.RecordError("p", "Ex", "boom", ForException("Ex", "boom", "f"), "prod", "error", nil)
+	if err != nil {
+		t.Fatalf("record: %v", err)
+	}
+	seedOccurrences(t, st, id, 4, 0) // 5 occurrences in total
+
+	if _, err := st.pruneIssueOccurrences(1, pruneChunk); err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	occ, err := st.Occurrences(id, 100)
+	if err != nil {
+		t.Fatalf("occurrences: %v", err)
+	}
+	if len(occ) != 1 {
+		t.Fatalf("kept %d occurrences, want 1", len(occ))
 	}
 }
 
