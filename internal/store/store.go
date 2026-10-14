@@ -20,9 +20,12 @@ type Store struct {
 	wdb *sql.DB
 	rdb *sql.DB
 
-	limMu        sync.Mutex
-	limWindows   map[string]*limWindow
-	MaxOccPerMin int
+	limMu      sync.Mutex
+	limWindows map[string]*limWindow
+	// MaxOccPerMin is the live per-fingerprint occurrence cap. It is atomic
+	// because the retention loop re-reads it from settings while ingest reads
+	// it on every event (M6.3).
+	MaxOccPerMin atomic.Int64
 
 	dropped atomic.Int64
 }
@@ -36,7 +39,7 @@ type limWindow struct {
 // per minute; past the cap the occurrence insert is skipped while the issue
 // upsert still runs, so issue counts stay accurate without row flooding.
 func (s *Store) allowOccurrence(fingerprint string) bool {
-	capPerMin := s.MaxOccPerMin
+	capPerMin := int(s.MaxOccPerMin.Load())
 	if capPerMin <= 0 {
 		return true
 	}
@@ -147,7 +150,8 @@ CREATE INDEX IF NOT EXISTS idx_occurrences_issue ON occurrences(issue_id, seen_a
 		rdb.Close()
 		return nil, err
 	}
-	s := &Store{wdb: wdb, rdb: rdb, limWindows: map[string]*limWindow{}, MaxOccPerMin: 30}
+	s := &Store{wdb: wdb, rdb: rdb, limWindows: map[string]*limWindow{}}
+	s.MaxOccPerMin.Store(30)
 	// M6.2: the default org and its memberships are seeded BEFORE projects are
 	// auto-provisioned, so a producer admitted on first sight already has an
 	// org to land in and an upgraded volume is never orphaned.
@@ -251,6 +255,10 @@ func migrate(db *sql.DB) error {
 	PRIMARY KEY(org_id, user_id))`},
 		{"projects.org_id", `ALTER TABLE projects ADD COLUMN org_id INTEGER NOT NULL DEFAULT 1`},
 		{"idx_projects_org", `CREATE INDEX IF NOT EXISTS idx_projects_org ON projects(org_id)`},
+		{"settings", `CREATE TABLE IF NOT EXISTS settings (
+	key TEXT PRIMARY KEY,
+	value TEXT NOT NULL,
+	updated_at INTEGER NOT NULL DEFAULT 0)`},
 	} {
 		if _, err := db.Exec(m.stmt); err != nil {
 			// Idempotent: only "already applied" failures may pass through.

@@ -64,10 +64,21 @@ same footer ingest-health strip.
 new-since-release, p95 delta vs the previous window, error spark, deep links
 into both sections) · `/queries` slow statements · `/jobs` queue/command
 health · `/orgs` organizations (create an org, move projects under it) ·
-`/keys` per-project ingest keys.
+`/keys` per-project ingest keys · `/settings` operator settings.
 
 History: the pre-M6.1 paths (`/issues`, `/logs`, `/profiles`, `/slowest`,
 `/traces`, `/traces/{id}`) keep serving the same content (Expand/Contract).
+
+## Settings (M6.3)
+
+Operator-tunable values live in the **database**, edited at `/settings`: the
+retention window, the prune interval, the per-fingerprint occurrence cap, the
+profiles kept per project, and the ingest rate/burst. The process flags are
+**import-once defaults** — a key is seeded only when absent, so a value saved
+in the UI wins from then on, across restarts and redeploys. The retention loop
+re-reads its knobs every cycle (marked *live* on the page); the ingest
+rate/burst are built into the shaper at boot (marked *restart*), and the page
+says so rather than pretending otherwise.
 
 ## Tenancy (M6.2)
 

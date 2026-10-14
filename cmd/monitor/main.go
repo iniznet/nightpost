@@ -39,7 +39,21 @@ func main() {
 		log.Fatalf("open store: %v", err)
 	}
 	defer st.Close()
-	st.MaxOccPerMin = *occurrenceCap
+	st.MaxOccPerMin.Store(int64(*occurrenceCap))
+	// M6.3: the process flags are IMPORT-ONCE defaults. SeedSettings only
+	// writes ABSENT keys, so a value an operator changed at /settings survives
+	// every restart and redeploy.
+	if err := st.SeedSettings(store.SettingDefaults{
+		RetentionDays:        *retentionDays,
+		PruneIntervalMinutes: pruneMinutes(*pruneInterval),
+		OccurrenceCap:        *occurrenceCap,
+		ProfilesPerProject:   5000,
+		IngestRate:           *ingestRate,
+		IngestBurst:          *ingestBurst,
+	}); err != nil {
+		log.Fatalf("seed settings: %v", err)
+	}
+	st.MaxOccPerMin.Store(int64(st.SettingInt(store.SettingOccurrenceCap, *occurrenceCap)))
 	logDBGuard(*dbPath)
 	if n, uerr := st.UnsignedProjectCount(); uerr == nil && n > 0 {
 		log.Printf("WARNING: %d project(s) accept unsigned ingest (no key) — rotate keys at /keys; the unsigned path is deprecated (#157)", n)
@@ -109,6 +123,13 @@ func main() {
 		ShaperRejections:  sh.Rejections,
 		KeyGateRejections: gate.Rejections,
 		UnknownAdmits:     gate.UnknownAdmits,
+	}), web.WithSettingDefaults(store.SettingDefaults{
+		RetentionDays:        *retentionDays,
+		PruneIntervalMinutes: pruneMinutes(*pruneInterval),
+		OccurrenceCap:        *occurrenceCap,
+		ProfilesPerProject:   5000,
+		IngestRate:           *ingestRate,
+		IngestBurst:          *ingestBurst,
 	}))
 
 	srv := &http.Server{Addr: *httpAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
@@ -174,16 +195,30 @@ func dbMount(path string) *mountPoint {
 	return best
 }
 
-// retentionLoop keeps the store bounded: occurrences age out, per-issue
-// occurrence history is capped, profiles keep a rolling window. One cycle
-// runs at boot, then on the interval; every cycle is chunked deletes on the
-// single-writer connection.
-func retentionLoop(st *store.Store, days int, every time.Duration) {
-	if every <= 0 {
-		every = 10 * time.Minute
+// pruneMinutes renders a prune interval as whole minutes, never below 1.
+func pruneMinutes(d time.Duration) int {
+	m := int((d + time.Minute - 1) / time.Minute)
+	if m < 1 {
+		m = 1
 	}
+	return m
+}
+
+// retentionLoop keeps the store bounded: occurrences age out, per-issue
+// occurrence history is capped, and every project keeps its own rolling
+// profile window. One cycle runs at boot, then on the interval; every cycle is
+// chunked deletes on the single-writer connection.
+//
+// M6.3: the loop RE-READS its knobs from the settings table each cycle, so an
+// operator's change at /settings takes effect without a restart — the flags
+// passed here are only the import-once fallback for an unseeded key.
+func retentionLoop(st *store.Store, fallbackDays int, fallbackEvery time.Duration) {
+	fallbackMinutes := pruneMinutes(fallbackEvery)
 	runOnce := func() {
-		msg, err := st.RunRetention(days, 5000)
+		days := st.SettingInt(store.SettingRetentionDays, fallbackDays)
+		keep := st.SettingInt(store.SettingProfilesPerProject, 5000)
+		st.MaxOccPerMin.Store(int64(st.SettingInt(store.SettingOccurrenceCap, int(st.MaxOccPerMin.Load()))))
+		msg, err := st.RunRetention(days, keep)
 		if err != nil {
 			log.Printf("retention: %v", err)
 			return
@@ -191,9 +226,12 @@ func retentionLoop(st *store.Store, days int, every time.Duration) {
 		log.Print(msg)
 	}
 	runOnce()
-	ticker := time.NewTicker(every)
-	defer ticker.Stop()
-	for range ticker.C {
+	for {
+		minutes := st.SettingInt(store.SettingPruneMinutes, fallbackMinutes)
+		if minutes <= 0 {
+			minutes = fallbackMinutes
+		}
+		time.Sleep(time.Duration(minutes) * time.Minute)
 		runOnce()
 	}
 }

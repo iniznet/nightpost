@@ -171,6 +171,7 @@ summary::marker{color:var(--faint)}
     <a href="{{tl .Toolbar "/jobs"}}"{{if eq .Nav "jobs"}} class="active"{{end}}>Jobs</a>
     <a href="{{tl .Toolbar "/orgs"}}"{{if eq .Nav "orgs"}} class="active"{{end}}>Orgs</a>
     <a href="{{tl .Toolbar "/keys"}}"{{if eq .Nav "keys"}} class="active"{{end}}>Keys</a>
+    <a href="{{tl .Toolbar "/settings"}}"{{if eq .Nav "settings"}} class="active"{{end}}>Settings</a>
   </nav>
   {{with .Projects}}{{if gt (len .) 0}}
   <div class="projects">

@@ -40,7 +40,7 @@ func testStore(t *testing.T) *store.Store {
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.MaxOccPerMin = 0
+	st.MaxOccPerMin.Store(0)
 	t.Cleanup(func() { st.Close() })
 	return st
 }

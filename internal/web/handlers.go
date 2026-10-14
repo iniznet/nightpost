@@ -39,6 +39,7 @@ const (
 	PageQueries     Page = "queries"
 	PageJobs        Page = "jobs"
 	PageOrgs        Page = "orgs"
+	PageSettings    Page = "settings"
 	PageLogin       Page = "login"
 	PageSetup       Page = "setup"
 )
@@ -59,6 +60,8 @@ func (p Page) nav() string {
 		return "jobs"
 	case PageOrgs:
 		return "orgs"
+	case PageSettings:
+		return "settings"
 	case PageKeys:
 		return "keys"
 	}
@@ -242,6 +245,9 @@ type server struct {
 	queries   *template.Template
 	jobs      *template.Template
 	orgs      *template.Template
+	settings  *template.Template
+
+	settingDefaults store.SettingDefaults
 
 	mu      sync.Mutex
 	stats   *store.StoreStats
@@ -375,6 +381,137 @@ func WithIngestHealth(h IngestHealth) Option {
 	return func(s *server) { s.health = h }
 }
 
+// WithSettingDefaults supplies the import-once fallbacks (the process flags)
+// the settings page shows for a key that has never been saved. Absent or
+// nonsensical values fall back to the shipped defaults, so the page is always
+// renderable and always saveable.
+func WithSettingDefaults(d store.SettingDefaults) Option {
+	return func(s *server) { s.settingDefaults = normalizeSettingDefaults(d) }
+}
+
+func normalizeSettingDefaults(d store.SettingDefaults) store.SettingDefaults {
+	if d.RetentionDays <= 0 {
+		d.RetentionDays = 30
+	}
+	if d.PruneIntervalMinutes <= 0 {
+		d.PruneIntervalMinutes = 10
+	}
+	if d.OccurrenceCap < 0 {
+		d.OccurrenceCap = 30
+	}
+	if d.ProfilesPerProject <= 0 {
+		d.ProfilesPerProject = 5000
+	}
+	if d.IngestRate <= 0 {
+		d.IngestRate = 50
+	}
+	if d.IngestBurst <= 0 {
+		d.IngestBurst = 100
+	}
+	return d
+}
+
+// SettingRow is one editable setting with its applied-ness made explicit.
+type SettingRow struct {
+	Key, Label, Help, Value string
+	Live                    bool
+}
+
+// settingMeta is the display order and copy for every writable setting.
+var settingMeta = []struct {
+	Key, Label, Help string
+	Live             bool
+}{
+	{store.SettingRetentionDays, "Retention (days)", "Occurrences and alert history older than this are deleted. Issues are never deleted — the defect list is the history.", true},
+	{store.SettingPruneMinutes, "Prune interval (minutes)", "How often the retention cycle runs. Re-read every cycle, so a change applies without a restart.", true},
+	{store.SettingOccurrenceCap, "Occurrence cap per fingerprint / minute", "0 = unlimited. Caps stored occurrence rows while issue counts stay accurate.", true},
+	{store.SettingProfilesPerProject, "Profiles kept per project", "PER PROJECT: one noisy producer can no longer evict another org's profile and trace window.", true},
+	{store.SettingIngestRate, "Ingest rate (events/s per project)", "Token-bucket refill rate; requests past the budget get a cheap 429 before any body read.", false},
+	{store.SettingIngestBurst, "Ingest burst ceiling (per project)", "Token-bucket burst ceiling.", false},
+}
+
+// handleSettings is the M6.3 settings surface: every operator-tunable value
+// lives here instead of in a process flag.
+func (s *server) handleSettings(w http.ResponseWriter, r *http.Request) {
+	s.renderSettings(w, r, nil)
+}
+
+func (s *server) renderSettings(w http.ResponseWriter, r *http.Request, extra map[string]any) {
+	t := parseToolbar(r.URL.Query())
+	data := s.baseData(r, t, PageSettings)
+	rows := make([]SettingRow, 0, len(settingMeta))
+	for _, m := range settingMeta {
+		v, err := s.st.Setting(m.Key)
+		if err != nil {
+			log.Printf("setting %s: %v", m.Key, err)
+		}
+		if v == "" {
+			v = s.defaultSetting(m.Key)
+		}
+		rows = append(rows, SettingRow{Key: m.Key, Label: m.Label, Help: m.Help, Live: m.Live, Value: v})
+	}
+	data["Rows"] = rows
+	for k, v := range extra {
+		data[k] = v
+	}
+	if err := s.settings.ExecuteTemplate(w, "layout", data); err != nil {
+		log.Printf("render settings: %v", err)
+	}
+}
+
+// defaultSetting renders the import-once fallback for one key.
+func (s *server) defaultSetting(key string) string {
+	d := normalizeSettingDefaults(s.settingDefaults)
+	switch key {
+	case store.SettingRetentionDays:
+		return strconv.Itoa(d.RetentionDays)
+	case store.SettingPruneMinutes:
+		return strconv.Itoa(d.PruneIntervalMinutes)
+	case store.SettingOccurrenceCap:
+		return strconv.Itoa(d.OccurrenceCap)
+	case store.SettingProfilesPerProject:
+		return strconv.Itoa(d.ProfilesPerProject)
+	case store.SettingIngestRate:
+		return strconv.FormatFloat(d.IngestRate, 'f', -1, 64)
+	case store.SettingIngestBurst:
+		return strconv.FormatFloat(d.IngestBurst, 'f', -1, 64)
+	}
+	return ""
+}
+
+func (s *server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "malformed form", http.StatusBadRequest)
+		return
+	}
+	if !sameOrigin(r) {
+		http.Error(w, "cross-origin save rejected", http.StatusForbidden)
+		return
+	}
+	// Validate EVERY submitted value before storing any, so a half-applied
+	// save can never leave the retention loop with a broken knob.
+	pending := make(map[string]string, len(settingMeta))
+	for _, m := range settingMeta {
+		v := strings.TrimSpace(r.FormValue(m.Key))
+		if v == "" {
+			continue
+		}
+		if err := store.ValidateSetting(m.Key, v); err != nil {
+			s.renderSettings(w, r, map[string]any{"Error": err.Error()})
+			return
+		}
+		pending[m.Key] = v
+	}
+	for k, v := range pending {
+		if err := s.st.SetSetting(k, v); err != nil {
+			s.renderSettings(w, r, map[string]any{"Error": err.Error()})
+			return
+		}
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	s.renderSettings(w, r, map[string]any{"Flash": fmt.Sprintf("Saved %d setting(s)", len(pending))})
+}
+
 // Register mounts the dashboard on the inner page mux (the auth gate wraps
 // every route by construction). auth == nil keeps the dashboard open — the
 // mode tests and pre-M4 dev runs use that.
@@ -395,6 +532,7 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *A
 		queries:   mustLayout("queries.html"),
 		jobs:      mustLayout("jobs.html"),
 		orgs:      mustLayout("orgs.html"),
+		settings:  mustLayout("settings.html"),
 	}
 	for _, o := range opts {
 		o(s)
@@ -437,6 +575,8 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *A
 	page.HandleFunc("GET /orgs", s.handleOrgs)
 	page.HandleFunc("POST /orgs/create", s.handleOrgCreate)
 	page.HandleFunc("POST /orgs/assign", s.handleOrgAssign)
+	page.HandleFunc("GET /settings", s.handleSettings)
+	page.HandleFunc("POST /settings/save", s.handleSettingsSave)
 	page.HandleFunc("GET /keys", s.handleKeys)
 	page.HandleFunc("POST /keys/rotate", s.handleKeyRotate)
 	page.HandleFunc("POST /keys/revoke", s.handleKeyRevoke)

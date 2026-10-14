@@ -40,7 +40,7 @@ func TestAlertLedgerAndQueries(t *testing.T) {
 
 func TestNewIssueAndCountQueries(t *testing.T) {
 	st := newTestStore(t)
-	st.MaxOccPerMin = 0
+	st.MaxOccPerMin.Store(0)
 	id, err := st.RecordError("front", "TypeError", "x undefined", "fp-n", "production", "error", nil)
 	if err != nil {
 		t.Fatal(err)

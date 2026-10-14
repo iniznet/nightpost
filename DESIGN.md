@@ -53,6 +53,10 @@
 - Filters: inline GET forms; selects inherit panel surface; hidden toolbar
   fields keep the context when a page filter is applied; pills for
   log-level, scope and view toggles.
+- Settings page: an editable table (key + label, value input, an explicit
+  `live`/`restart` badge, and the note that says why). The applied-ness badge
+  is the honest part of the design — a setting that silently needs a restart
+  is a support ticket.
 - Tables: `display:block; overflow-x:auto`, so a wide table scrolls inside
   its own box and the page never gains a horizontal scrollbar.
 
