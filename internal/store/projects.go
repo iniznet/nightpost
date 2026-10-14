@@ -6,6 +6,8 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"net/url"
+	"strings"
 	"time"
 )
 
@@ -25,6 +27,9 @@ type Project struct {
 	IngestKey string
 	CreatedAt time.Time
 	RotatedAt time.Time
+	// CORSOrigin is the project's browser-origin allowlist (comma-separated).
+	// Empty means "fall back to the install's -cors-origin default" (M6.5).
+	CORSOrigin string
 }
 
 // HasKey reports whether the project requires a signed ingest request.
@@ -64,7 +69,7 @@ func (s *Store) ProjectIngestKey(key string) (string, error) {
 
 // ListProjects returns every project ordered by key.
 func (s *Store) ListProjects() ([]Project, error) {
-	rows, err := s.rdb.Query(`SELECT key, ingest_key, created_at, rotated_at FROM projects ORDER BY key`)
+	rows, err := s.rdb.Query(`SELECT key, ingest_key, created_at, rotated_at, cors_origin FROM projects ORDER BY key`)
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +78,7 @@ func (s *Store) ListProjects() ([]Project, error) {
 	for rows.Next() {
 		var p Project
 		var created, rotated int64
-		if err := rows.Scan(&p.Key, &p.IngestKey, &created, &rotated); err != nil {
+		if err := rows.Scan(&p.Key, &p.IngestKey, &created, &rotated, &p.CORSOrigin); err != nil {
 			return nil, err
 		}
 		if created > 0 {
@@ -114,12 +119,78 @@ func (s *Store) RevokeIngestKey(key string) error {
 	return nil
 }
 
+// ProjectCORSOrigin returns the project's browser-origin allowlist; "" means
+// the install default applies and an unknown project is reported as "" too.
+func (s *Store) ProjectCORSOrigin(key string) (string, error) {
+	var origin string
+	err := s.rdb.QueryRow(`SELECT cors_origin FROM projects WHERE key = ?`, key).Scan(&origin)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return origin, err
+}
+
+// SetProjectCORSOrigin stores the normalized allowlist for a project. The
+// caller validates first (NormalizeCORSOrigins); an empty value clears it back
+// to the install default.
+func (s *Store) SetProjectCORSOrigin(key, origin string) error {
+	if err := s.EnsureProject(key); err != nil {
+		return err
+	}
+	if _, err := s.wdb.Exec(`UPDATE projects SET cors_origin = ? WHERE key = ?`, strings.TrimSpace(origin), key); err != nil {
+		return fmt.Errorf("set project cors origin: %w", err)
+	}
+	return nil
+}
+
 // UnsignedProjectCount reports projects still accepting legacy ingest;
 // boot uses it for the deprecation warning (#157).
 func (s *Store) UnsignedProjectCount() (int, error) {
 	var n int
 	err := s.rdb.QueryRow(`SELECT COUNT(*) FROM projects WHERE ingest_key = ''`).Scan(&n)
 	return n, err
+}
+
+// NormalizeCORSOrigins validates and normalizes a comma-separated
+// browser-origin allowlist for one project.
+//
+// Each entry must be an explicit scheme://host[:port] with no path, query or
+// fragment — a wildcard is refused outright, because these routes accept
+// UNAUTHENTICATED browser posts and "*" would let any page on the internet
+// write into the project's telemetry. An empty return means "inherit the
+// install default".
+func NormalizeCORSOrigins(raw string) (string, error) {
+	if strings.TrimSpace(raw) == "" {
+		return "", nil
+	}
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		entry := strings.TrimSpace(part)
+		if entry == "" {
+			continue
+		}
+		if entry == "*" {
+			return "", fmt.Errorf("wildcard origin is not allowed; name each origin explicitly")
+		}
+		u, err := url.Parse(entry)
+		if err != nil {
+			return "", fmt.Errorf("origin %q: %w", entry, err)
+		}
+		if u.Scheme != "http" && u.Scheme != "https" {
+			return "", fmt.Errorf("origin %q: scheme must be http or https", entry)
+		}
+		if u.Host == "" {
+			return "", fmt.Errorf("origin %q: missing host", entry)
+		}
+		if u.Path != "" && u.Path != "/" {
+			return "", fmt.Errorf("origin %q: must not contain a path", entry)
+		}
+		if u.RawQuery != "" || u.Fragment != "" {
+			return "", fmt.Errorf("origin %q: must not contain a query or fragment", entry)
+		}
+		out = append(out, u.Scheme+"://"+u.Host)
+	}
+	return strings.Join(out, ","), nil
 }
 
 func newIngestSecret() (string, error) {

@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"encoding/hex"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -36,7 +38,9 @@ func main() {
 	maxAutoProjects := flag.Int("max-auto-projects", 500, "max projects auto-provisioned from unsigned ingest before a NEW name is refused (0 = unbounded)")
 	requireIngestKeys := flag.Bool("require-ingest-keys", false, "refuse unsigned ingest entirely — set this once ingest is reachable through a public ingress")
 	sessionSecret := flag.String("session-secret", "", "HMAC key for dashboard session cookies (empty = random per boot; sessions die on restart)")
-	resetAdmin := flag.String("reset-admin", "", "one-shot: reset (or create) this admin email's password, print a fresh one, and exit")
+	sessionSecretFile := flag.String("session-secret-file", "", "file holding the session key (0600); loaded when -session-secret is empty, and a generated key is PERSISTED there so sessions survive restarts")
+	resetAdmin := flag.String("reset-admin", "", "one-shot: reset (or create) this admin email's password, write it to a 0600 file, and exit — never printed to the log")
+	resetAdminOut := flag.String("reset-admin-out", "", "where -reset-admin writes the minted password (default <db-dir>/admin-reset.txt, mode 0600)")
 	alertsConfig := flag.String("alerts-config", "", "path to alerts JSON (channels + rules); empty = alerting disabled")
 	flag.Parse()
 
@@ -70,22 +74,30 @@ func main() {
 	gate := ingest.NewKeyGate(st, 5*time.Second)
 	gate.ConfigureAutoProvision(*maxAutoProjects, *requireIngestKeys)
 	guard := ingest.NewIngressGuard(*ingressGlobalRate, *ingressGlobalBurst, *ingressIPRate, *ingressIPBurst)
+	cors := ingest.NewCORSResolver(*corsOrigin, st.ProjectCORSOrigin, 30*time.Second)
 	if *resetAdmin != "" {
 		email := strings.ToLower(strings.TrimSpace(*resetAdmin))
 		pw, rerr := st.ResetAdminPassword(email)
 		if rerr != nil {
 			log.Fatalf("reset-admin: %v", rerr)
 		}
-		log.Printf("admin %q password reset (shown once): %s — restart without -reset-admin when done", email, pw)
+		out := *resetAdminOut
+		if out == "" {
+			out = filepath.Join(filepath.Dir(*dbPath), "admin-reset.txt")
+		}
+		if werr := os.WriteFile(out, []byte(pw+"\n"), 0o600); werr != nil {
+			log.Fatalf("reset-admin: write %s: %v", out, werr)
+		}
+		_ = os.Chmod(out, 0o600)
+		// The password is deliberately NOT logged: the container's stdout lands
+		// in the json-file log and would keep the credential for the log's
+		// whole rotation window (M6.5).
+		log.Printf("admin %q password reset — written to %s (mode 0600). Read it there and delete the file; it is not printed anywhere. Restart without -reset-admin when done.", email, out)
 		return
 	}
-	secret := []byte(*sessionSecret)
-	if len(secret) == 0 {
-		secret = make([]byte, 32)
-		if _, err := rand.Read(secret); err != nil {
-			log.Fatalf("session secret entropy: %v", err)
-		}
-		log.Printf("WARNING: -session-secret unset; generated a per-boot key — dashboard sessions will not survive restarts")
+	secret, serr := resolveSessionSecret(*sessionSecret, *sessionSecretFile)
+	if serr != nil {
+		log.Fatalf("session secret: %v", serr)
 	}
 	if *alertsConfig != "" {
 		acfg, aerr := alerts.LoadConfig(*alertsConfig)
@@ -118,8 +130,8 @@ func main() {
 		return ingest.WithIngressGuard(guard, ingest.WithKeyGate(gate, project, ingest.WithShaper(sh, next)))
 	}
 	mux.HandleFunc("POST /ingest/{project}/sentry", chain(ingest.PathProject, ingest.SentryHandler(st)))
-	mux.HandleFunc("POST /ingest/{project}/profile", ingest.WithCORS(*corsOrigin, chain(ingest.PathProject, ingest.ProfileHandler(st))))
-	mux.HandleFunc("POST /ingest/{project}/error", ingest.WithCORS(*corsOrigin, chain(ingest.PathProject, ingest.ErrorHandler(st))))
+	mux.HandleFunc("POST /ingest/{project}/profile", ingest.WithCORSSource(cors.OriginFor, chain(ingest.PathProject, ingest.ProfileHandler(st))))
+	mux.HandleFunc("POST /ingest/{project}/error", ingest.WithCORSSource(cors.OriginFor, chain(ingest.PathProject, ingest.ErrorHandler(st))))
 	mux.HandleFunc("POST /ingest/{project}/xhprof", chain(ingest.XHProfProject, ingest.XHProfHandler(st)))
 	mux.HandleFunc("POST /ingest/{project}/query", chain(ingest.PathProject, ingest.QueryHandler(st)))
 	mux.HandleFunc("POST /ingest/{project}/job", chain(ingest.PathProject, ingest.JobHandler(st)))
@@ -133,8 +145,8 @@ func main() {
 	mux.HandleFunc("POST /api/profiler/store", chain(ingest.XHProfProject, ingest.XHProfHandler(st)))
 	mux.HandleFunc("POST /api/{project}/profiler/store", chain(ingest.XHProfProject, ingest.XHProfHandler(st)))
 	// Browser preflight for the first-party reporter endpoints.
-	mux.HandleFunc("OPTIONS /ingest/{project}/error", ingest.PreflightHandler(*corsOrigin))
-	mux.HandleFunc("OPTIONS /ingest/{project}/profile", ingest.PreflightHandler(*corsOrigin))
+	mux.HandleFunc("OPTIONS /ingest/{project}/error", ingest.PreflightSource(cors.OriginFor))
+	mux.HandleFunc("OPTIONS /ingest/{project}/profile", ingest.PreflightSource(cors.OriginFor))
 	mux.HandleFunc("GET /up", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	web.Register(mux, st, gate, auth, web.WithIngestHealth(web.IngestHealth{
 		ShaperRejections:  sh.Rejections,
@@ -143,7 +155,7 @@ func main() {
 		GateRefusals:      gate.Refusals,
 		GuardGlobal:       guard.GlobalRejections,
 		GuardIP:           guard.IPRejections,
-	}), web.WithSettingDefaults(store.SettingDefaults{
+	}), web.WithCORSInvalidator(cors), web.WithSettingDefaults(store.SettingDefaults{
 		RetentionDays:        *retentionDays,
 		PruneIntervalMinutes: pruneMinutes(*pruneInterval),
 		OccurrenceCap:        *occurrenceCap,
@@ -175,6 +187,61 @@ type mountPoint struct{ dir, fstype string }
 // logDBGuard prints the resolved DB path and the filesystem mount holding
 // it, warning loudly when the database would live in the container layer
 // and be wiped by the next deploy (#159).
+// resolveSessionSecret returns the dashboard cookie key.
+//
+// Precedence: the -session-secret flag, then the file named by
+// -session-secret-file, then a fresh random key. With a file configured a
+// GENERATED key is persisted (0600) instead of being thrown away at exit: the
+// old random-per-boot default silently logged every admin out on each deploy,
+// which is precisely what a one-command install must not do (M6.5).
+func resolveSessionSecret(flagValue, filePath string) ([]byte, error) {
+	if flagValue != "" {
+		return []byte(flagValue), nil
+	}
+	if filePath == "" {
+		log.Printf("WARNING: -session-secret/-session-secret-file unset; generated a per-boot key — dashboard sessions will not survive restarts")
+		return randomSessionSecret()
+	}
+	if b, err := os.ReadFile(filePath); err == nil {
+		if s := strings.TrimSpace(string(b)); s != "" {
+			log.Printf("session secret loaded from %s", filePath)
+			return []byte(s), nil
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("read %s: %w", filePath, err)
+	}
+
+	secret, err := randomSessionSecret()
+	if err != nil {
+		return nil, err
+	}
+	if dir := filepath.Dir(filePath); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return nil, fmt.Errorf("create %s: %w", dir, err)
+		}
+	}
+	// The secret is already the hex form that is written, so the file and the
+	// in-process key are byte-identical.
+	if err := os.WriteFile(filePath, []byte(string(secret)+"\n"), 0o600); err != nil {
+		return nil, fmt.Errorf("persist session secret to %s: %w", filePath, err)
+	}
+	_ = os.Chmod(filePath, 0o600)
+	log.Printf("session secret generated and persisted to %s (mode 0600) — dashboard sessions now survive restarts", filePath)
+	return secret, nil
+}
+
+// randomSessionSecret returns the key in the SAME hex form the file holds.
+// Returning raw bytes here would make the persisted file a different key from
+// the one this boot used — i.e. sessions would still die on restart, which is
+// the whole defect this is meant to fix.
+func randomSessionSecret() ([]byte, error) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return nil, fmt.Errorf("session secret entropy: %w", err)
+	}
+	return []byte(hex.EncodeToString(raw)), nil
+}
+
 func logDBGuard(dbPath string) {
 	abs, err := filepath.Abs(dbPath)
 	if err != nil {

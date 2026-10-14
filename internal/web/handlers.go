@@ -231,6 +231,7 @@ type server struct {
 	st     *store.Store
 	gate   *ingest.KeyGate
 	health IngestHealth
+	cors   originInvalidator
 
 	dashboard *template.Template
 	issues    *template.Template
@@ -401,6 +402,15 @@ type Option func(*server)
 // strip renders. Without it the strip shows store figures only.
 func WithIngestHealth(h IngestHealth) Option {
 	return func(s *server) { s.health = h }
+}
+
+// originInvalidator drops a cached CORS decision, so an allowlist edit takes
+// effect on the next request instead of waiting out the resolver's TTL.
+type originInvalidator interface{ Invalidate(project string) }
+
+// WithCORSInvalidator attaches the ingest CORS resolver.
+func WithCORSInvalidator(v originInvalidator) Option {
+	return func(s *server) { s.cors = v }
 }
 
 // WithSettingDefaults supplies the import-once fallbacks (the process flags)
@@ -602,6 +612,7 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *A
 	page.HandleFunc("GET /keys", s.handleKeys)
 	page.HandleFunc("POST /keys/rotate", s.handleKeyRotate)
 	page.HandleFunc("POST /keys/revoke", s.handleKeyRevoke)
+	page.HandleFunc("POST /keys/origin", s.handleKeyOrigin)
 }
 
 // baseData builds the shared layout context for the pre-auth pages
@@ -1413,6 +1424,41 @@ func (s *server) handleKeyRevoke(w http.ResponseWriter, r *http.Request) {
 	log.Printf("ingest key revoked for project %q", project)
 	w.Header().Set("Cache-Control", "no-store")
 	s.renderKeys(w, r, map[string]any{"Revoked": project})
+}
+
+// handleKeyOrigin saves a project's browser-origin allowlist (M6.5). The
+// allowlist was one global -cors-origin string applied to every browser route,
+// which a multi-tenant install cannot express: each tenant's front end is a
+// different origin. Empty clears it back to the install default.
+func (s *server) handleKeyOrigin(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "malformed form", http.StatusBadRequest)
+		return
+	}
+	if !sameOrigin(r) {
+		http.Error(w, "cross-origin origin edit rejected", http.StatusForbidden)
+		return
+	}
+	project := strings.TrimSpace(r.FormValue("project"))
+	if project == "" {
+		http.Error(w, "project required", http.StatusBadRequest)
+		return
+	}
+	normalized, err := store.NormalizeCORSOrigins(r.FormValue("cors_origin"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.st.SetProjectCORSOrigin(project, normalized); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if s.cors != nil {
+		s.cors.Invalidate(project)
+	}
+	log.Printf("cors origin set for project %q", project)
+	w.Header().Set("Cache-Control", "no-store")
+	s.renderKeys(w, r, map[string]any{"OriginSaved": project, "OriginValue": normalized})
 }
 
 // sameOrigin rejects a cross-origin form POST (CSRF hardening for the key

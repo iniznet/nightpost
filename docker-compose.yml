@@ -29,13 +29,21 @@
 # settings table and are edited at /settings. Any flags below are IMPORT-ONCE
 # defaults — a value saved in the UI wins from then on.
 #
-# M4 (#157): the dashboard now requires login (first visit = /setup). Set a
-# stable -session-secret (else logins die on every restart) and optionally
-# -alerts-config /path/alerts.json (mounted secret file; channels + rules).
-# Lost admin: one-off `docker exec ... monitor -reset-admin <email>` prints
-# a fresh password once. Ingest keys rotate OR revoke at /keys (revoke falls
+# M4 (#157): the dashboard requires login (first visit = /setup). Set
+# -session-secret, or point -session-secret-file at a mounted path and the key
+# is generated once and PERSISTED there (0600) — an unset key is random per
+# boot, so every deploy would silently log the admins out (M6.5).
+# Optionally -alerts-config /path/alerts.json (mounted secret file; channels +
+# rules).
+# Lost admin: one-off `docker exec ... monitor -reset-admin <email>` writes a
+# fresh password to <db-dir>/admin-reset.txt (0600) and names that path in the
+# log; the password itself is never printed, because container stdout lands in
+# the json-file log. Read it, then delete the file. Ingest keys rotate OR revoke at /keys (revoke falls
 # back to unsigned legacy); unsigned legacy ingest still works until a key is
 # issued.
+#
+# M6.5: per-project CORS — the browser allowlist moved onto the project row
+# (edit it at /keys); -cors-origin only seeds a project whose row is empty.
 #
 # M6.10: today's ingest posture is safe only because nothing publishes a host
 # port. The moment ingest sits behind a public ingress, set

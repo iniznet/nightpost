@@ -255,6 +255,7 @@ func migrate(db *sql.DB) error {
 	PRIMARY KEY(org_id, user_id))`},
 		{"projects.org_id", `ALTER TABLE projects ADD COLUMN org_id INTEGER NOT NULL DEFAULT 1`},
 		{"idx_projects_org", `CREATE INDEX IF NOT EXISTS idx_projects_org ON projects(org_id)`},
+		{"projects.cors_origin", `ALTER TABLE projects ADD COLUMN cors_origin TEXT NOT NULL DEFAULT ''`},
 		{"settings", `CREATE TABLE IF NOT EXISTS settings (
 	key TEXT PRIMARY KEY,
 	value TEXT NOT NULL,

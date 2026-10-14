@@ -93,6 +93,23 @@ org's profiles and traces). Dashboard accounts get a role per org
 dashboard and keys pages; the org hierarchy is NOT an authentication
 boundary yet — role enforcement lands with M6.3's settings pages.
 
+## Install posture (M6.5)
+
+Three things a self-hosted install must get right by default, because getting
+them wrong is silent rather than loud:
+
+- **The dashboard session key survives restarts.** Point
+  `-session-secret-file` at a mounted path and the generated key is persisted
+  there (0600). Without it the key is random per boot and every deploy logs the
+  admins out.
+- **A recovered password is never written to a log.** `-reset-admin` writes it
+  to a 0600 file and names that path; container stdout lands in the json-file
+  log, which would keep the credential for the log's whole rotation window.
+- **The browser allowlist is per project.** A tenant's front end is a different
+  origin, so the allowlist lives on the project row (edit it at `/keys`) and
+  `-cors-origin` is only the seed for a row that is empty. A wildcard is
+  refused: these routes accept unauthenticated browser posts.
+
 ## Ingress posture (M6.10)
 
 Ingest is safe behind the docker network, but it is hardened for public
