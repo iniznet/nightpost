@@ -22,8 +22,30 @@ must stay server-rendered.
 | [producers/sveltekit.md](producers/sveltekit.md) | the producer is SvelteKit or Node |
 | [producers/webhook.md](producers/webhook.md) | the producer is anything else, or you just want curl |
 
-Two things this folder does NOT have yet, and why: a **screenshot gallery**
-(the UI is server-rendered HTML and the screenshots are captured from a live
-instance, not generated in CI) and a **quickstart GIF** (same reason). Until
-then the README quickstart is the onboarding path, and it is verified: a clean
+## Screenshot gallery
+
+Captured from a live local install of the real binary — not generated in CI. The
+instance had three projects and 239 wire-spec requests posted into it, so the
+pages show real aggregates rather than empty states.
+
+| Page | Screenshot |
+|---|---|
+| First-run setup — `/setup`, the only open page until an admin exists | ![First-run setup](screenshots/00-first-run-setup.png) |
+| Dashboard — per-project health cards + the live ingest-health strip | ![Dashboard](screenshots/01-dashboard.png) |
+| Errors ▸ Issues — fingerprint groups, counts, first/last seen | ![Errors: issues](screenshots/02-errors-issues.png) |
+| Errors ▸ Logs — channel/level stream | ![Errors: logs](screenshots/03-errors-logs.png) |
+| Performance ▸ Endpoints — route-aggregated p50/p95/count | ![Performance: endpoints](screenshots/04-performance-endpoints.png) |
+| Performance ▸ Traces — trace index with tree badge, deep-linkable | ![Performance: traces](screenshots/05-performance-traces.png) |
+| Performance ▸ Hotspots — proportional bars, app-vs-framework | ![Performance: hotspots](screenshots/06-performance-hotspots.png) |
+| Queries — fingerprint-grouped slow SQL | ![Queries](screenshots/07-queries.png) |
+| Jobs — queue/command runs and heartbeats | ![Jobs](screenshots/08-jobs.png) |
+| Keys — per-project ingest keys, rotation and CORS origin | ![Keys](screenshots/09-keys.png) |
+| Settings — retention, prune interval, per-project profile budget, per-project CORS origin | ![Settings](screenshots/10-settings.png) |
+| Orgs — org/project grouping (M6.2) | ![Orgs](screenshots/11-orgs.png) |
+
+A **quickstart GIF** is still absent, and deliberately: the UI is server-rendered
+with zero JavaScript, so there is no state transition worth animating — a slide
+GIF of static screens would add megabytes and show nothing the gallery above does
+not. The onboarding path is the README quickstart, and that is verified: a clean
 directory, the real binary, the shipped container flags.
+
