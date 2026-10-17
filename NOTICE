@@ -1,0 +1,17 @@
+fenrirealm-monitor (product name: Nightpost)
+Copyright 2026 iniznet
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product includes software developed by third parties. Only components
+actually linked into the distributed binary are listed (verified with
+`go list -deps ./cmd/monitor`):
+
+  modernc.org/sqlite               BSD-3-Clause  (and modernc.org/libc,
+                                                 mathutil, memory, vtab)
+  github.com/dustin/go-humanize    MIT
+  github.com/mattn/go-isatty       MIT
+  github.com/ncruces/go-strftime   MIT
+  github.com/remyoudompheng/bigfft BSD-3-Clause
+  golang.org/x/sys                 BSD-3-Clause
+  vendored golang.org/x/crypto, /net, /text  BSD-3-Clause (Go toolchain)

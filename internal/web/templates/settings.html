@@ -1,0 +1,25 @@
+{{define "title"}}Settings — fenrirealm-monitor{{end}}
+{{define "content"}}
+<h1>Settings</h1>
+{{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}
+{{if .Error}}<p class="form-error">{{.Error}}</p>{{end}}
+<p class="faint">Settings live in the database. The process flags are <b>import-once defaults</b>: a value saved here wins from now on, including across restarts and redeploys. <span class="badge ok">live</span> is re-read by the running process; <span class="badge warn">restart</span> needs a restart to take effect.</p>
+<form method="post" action="/settings/save">
+<table>
+<thead><tr><th>Setting</th><th>Value</th><th>Applied</th><th>Notes</th></tr></thead>
+<tbody>
+{{range .Rows}}
+<tr>
+  <td class="mono nowrap">{{.Key}}<div class="faint">{{.Label}}</div></td>
+  <td><input name="{{.Key}}" value="{{.Value}}" inputmode="decimal" aria-label="{{.Label}}"></td>
+  <td>{{if .Live}}<span class="badge ok">live</span>{{else}}<span class="badge warn">restart</span>{{end}}</td>
+  <td class="faint">{{.Help}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+<div class="actions"><button type="submit">Save</button></div>
+</form>
+<h2>Not settings (producer-side)</h2>
+<p class="faint">Sampling rates, the Sentry DSN and the log-channel list belong to the <b>producer</b> repos (Laravel / SvelteKit env) — the monitor only receives what they send, so there is nothing here to tune them. See the per-stack producer guides in M6.8.</p>
+{{end}}

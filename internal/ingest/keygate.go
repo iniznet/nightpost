@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/iniznet/fenrirealm-monitor/internal/store"
@@ -41,11 +42,153 @@ type KeyGate struct {
 	ttl     time.Duration
 	mu      sync.Mutex
 	entries map[string]keyEntry
-	seen    sync.Map
+	seen    *knownSet
+
+	// maxAuto bounds first-sight unsigned admission (M6.10); 0 keeps the
+	// legacy unbounded behaviour. requireKeys refuses unsigned ingest wholly —
+	// the endgame posture once ingest sits behind a public ingress.
+	maxAuto     int
+	requireKeys bool
+
+	// requireRegistered refuses a project nobody registered, instead of
+	// auto-provisioning it. This is the narrower, safer half of the public
+	// ingress posture: known unsigned projects keep working (Expand/Contract),
+	// but the caller can no longer mint a project by naming it.
+	requireRegistered bool
+
+	rejected      atomic.Int64
+	unknownAdmits atomic.Int64
+	refused       atomic.Int64
 }
 
+// projectCounter is optional: a ProjectKeyStore that can count its unsigned
+// projects lets the gate bound auto-provisioning. Kept SEPARATE from
+// ProjectKeyStore so existing fixtures stay valid.
+type projectCounter interface {
+	UnsignedProjectCount() (int, error)
+}
+
+// projectExistence is optional too: registration-required mode asks it whether
+// a project row exists before it would auto-provision one.
+type projectExistence interface {
+	ProjectExists(project string) (bool, error)
+}
+
+// ConfigureAutoProvision bounds first-sight unsigned admission: past
+// maxProjects unsigned projects a NEW name is refused instead of
+// auto-provisioned, and requireKeys refuses unsigned ingest entirely. Both
+// exist because the {project} name is chosen by the caller.
+func (g *KeyGate) ConfigureAutoProvision(maxProjects int, requireKeys bool) {
+	g.maxAuto = maxProjects
+	g.requireKeys = requireKeys
+}
+
+// RequireRegistered flips the gate to registration-required mode: an UNKNOWN
+// project answers 401 instead of being auto-provisioned. A project that exists
+// without a key stays admitted, so the flag never breaks a running producer —
+// it only stops new names from existing at all.
+func (g *KeyGate) RequireRegistered(v bool) { g.requireRegistered = v }
+
+// knownSet is a BOUNDED set of project names the gate has already decided on.
+//
+// It exists so the first-sight path runs once per project per process rather
+// than once per request — but the name is caller-chosen, so it must not grow
+// without limit (M6.10). Eviction is oldest-first and harmless: a name evicted
+// early costs one extra decision, never a wrong admission.
+type knownSet struct {
+	mu    sync.Mutex
+	max   int
+	seq   int64
+	items map[string]int64
+}
+
+func newKnownSet(max int) *knownSet {
+	if max <= 0 {
+		max = 4096
+	}
+	return &knownSet{max: max, items: map[string]int64{}}
+}
+
+func (s *knownSet) has(project string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.items[project]
+	return ok
+}
+
+// add records a first sight and reports whether THIS call was the one that
+// inserted it. That return value is what makes the counters exact: has() and add()
+// take the lock separately, so two concurrent first sights of the same name would
+// both take the slow path, and both would then count an auto-provision that only
+// happened once.
+func (s *knownSet) add(project string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.items[project]; ok {
+		return false
+	}
+	if len(s.items) >= s.max {
+		s.evictOldestLocked()
+	}
+	s.seq++
+	s.items[project] = s.seq
+	return true
+}
+
+// size is the current entry count; tests assert the bound holds.
+func (s *knownSet) size() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.items)
+}
+
+// evictOldestLocked drops the older half, so eviction is amortized rather than
+// a scan on every insert once the set is full.
+func (s *knownSet) evictOldestLocked() {
+	cutoff := s.seq - int64(s.max/2)
+	for k, seq := range s.items {
+		if seq <= cutoff {
+			delete(s.items, k)
+		}
+	}
+}
+
+// Refusals reports first-sight unsigned projects the cap or requireKeys
+// refused — the health strip's answer to "why is my data missing?".
+func (g *KeyGate) Refusals() int64 { return g.refused.Load() }
+
+// Rejections reports ingest requests answered 401 for a missing/wrong key.
+func (g *KeyGate) Rejections() int64 { return g.rejected.Load() }
+
+// UnknownAdmits reports auto-provisioned unsigned projects. A rising figure on a
+// public ingress is the M6.10 attack signature.
+//
+// It is a SIGNATURE, not an exact tally of distinct names: only the goroutine
+// that inserted a name counts it (so a concurrent first sight is counted once),
+// but eviction from the bounded known set can let a still-live name be inserted
+// and counted again later. Eviction is sized far above the project counts this is
+// meant to hold, so in practice the two agree.
+func (g *KeyGate) UnknownAdmits() int64 { return g.unknownAdmits.Load() }
+
 func NewKeyGate(st ProjectKeyStore, ttl time.Duration) *KeyGate {
-	return &KeyGate{store: st, ttl: ttl, entries: map[string]keyEntry{}}
+	return &KeyGate{store: st, ttl: ttl, entries: map[string]keyEntry{}, seen: newKnownSet(4096)}
+}
+
+// projectExists reports whether a project row exists, failing OPEN on a read
+// error: a transient store problem must not blackhole producers, which is the
+// same posture the key lookup above takes. Failing open here admits the event
+// and skips provisioning; it never signs a request for a keyed project.
+func (g *KeyGate) projectExists(project string) bool {
+	ex, ok := g.store.(projectExistence)
+	if !ok {
+		return false
+	}
+	known, err := ex.ProjectExists(project)
+	if err != nil {
+		log.Printf("keygate: existence check %q failed (%v); admitting unsigned", project, err)
+		return true
+	}
+	return known
 }
 
 // Invalidate clears the cached key decision for a project.
@@ -137,15 +280,51 @@ func WithKeyGate(g *KeyGate, resolveProject func(*http.Request) string, next htt
 		if want != "" {
 			presented := presentedKey(r)
 			if presented == "" || !constantTimeEqual(want, store.HashIngestKey(presented)) {
+				g.rejected.Add(1)
 				http.Error(w, "invalid ingest key", http.StatusUnauthorized)
 				return
 			}
 			next(w, r)
 			return
 		}
-		if _, loaded := g.seen.LoadOrStore(project, true); !loaded {
-			if err := g.store.EnsureProject(project); err != nil {
-				log.Printf("keygate: ensure project %q: %v", project, err)
+		// First sight of an unsigned project: the name was chosen by the
+		// caller, so admission is BOUNDED rather than automatic (M6.10).
+		if !g.seen.has(project) {
+			if g.requireKeys {
+				g.refused.Add(1)
+				http.Error(w, "ingest keys required", http.StatusUnauthorized)
+				return
+			}
+			// Registration-required mode is the narrower refusal: a name that
+			// no operator registered cannot be created by a POST.
+			exists := false
+			if g.requireRegistered {
+				exists = g.projectExists(project)
+				if !exists {
+					g.refused.Add(1)
+					http.Error(w, "unknown project — register it at /keys", http.StatusUnauthorized)
+					return
+				}
+			}
+			if g.maxAuto > 0 {
+				if c, ok := g.store.(projectCounter); ok {
+					if n, err := c.UnsignedProjectCount(); err == nil && n >= g.maxAuto {
+						g.refused.Add(1)
+						http.Error(w, "auto-provision limit reached — issue an ingest key at /keys", http.StatusTooManyRequests)
+						return
+					}
+				}
+			}
+			// Only the goroutine that actually inserted the name counts and
+			// provisions it, so a concurrent first sight cannot double-count.
+			// UnknownAdmits counts AUTO-PROVISIONING, not first sight: an
+			// already-registered project needed no row, so counting it would
+			// inflate the very attack signature this number exists to show.
+			if g.seen.add(project) && !exists {
+				g.unknownAdmits.Add(1)
+				if err := g.store.EnsureProject(project); err != nil {
+					log.Printf("keygate: ensure project %q: %v", project, err)
+				}
 			}
 		}
 		next(w, r)

@@ -100,7 +100,18 @@ func (s *Store) CreateUserIfNone(email, pwHash string) (bool, error) {
 		return false, err
 	}
 	n, err := res.RowsAffected()
-	return n > 0, err
+	if err != nil {
+		return false, err
+	}
+	if n > 0 {
+		// M6.2: a new dashboard account owns the default org from the start.
+		if _, merr := s.wdb.Exec(`INSERT OR IGNORE INTO org_members (org_id, user_id, role, created_at)
+			SELECT ?, id, ?, CAST(strftime('%s','now') AS INTEGER) FROM users WHERE email = ?`,
+			DefaultOrgID, RoleOwner, email); merr != nil {
+			return true, merr
+		}
+	}
+	return n > 0, nil
 }
 
 // VerifyUser checks credentials; unknown emails burn a comparable PBKDF2
@@ -134,6 +145,13 @@ func (s *Store) ResetAdminPassword(email string) (string, error) {
 		ON CONFLICT(email) DO UPDATE SET pw_hash = excluded.pw_hash, sessions_valid_after = excluded.sessions_valid_after`, email, hashed)
 	if err != nil {
 		return "", err
+	}
+	// M6.2: -reset-admin may create the account, so it must own the default
+	// org too — otherwise the recovered login would see no projects at all.
+	if _, merr := s.wdb.Exec(`INSERT OR IGNORE INTO org_members (org_id, user_id, role, created_at)
+		SELECT ?, id, ?, CAST(strftime('%s','now') AS INTEGER) FROM users WHERE email = ?`,
+		DefaultOrgID, RoleOwner, email); merr != nil {
+		return "", merr
 	}
 	return pw, nil
 }

@@ -1,0 +1,21 @@
+{
+  "spec": 1,
+  "name": "job-run",
+  "transport": "http",
+  "route": "POST /ingest/{project}/job",
+  "project": "wire",
+  "headers": { "content-type": "application/json" },
+  "body": {
+    "name": "quests:reset-stale-progress",
+    "kind": "command",
+    "queue": "default",
+    "seconds": 3.2,
+    "ok": true
+  },
+  "expect": {
+    "status": 202,
+    "assert": "job",
+    "kind": "command",
+    "name": "quests:reset-stale-progress"
+  }
+}

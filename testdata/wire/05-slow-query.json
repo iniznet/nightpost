@@ -1,0 +1,20 @@
+{
+  "spec": 1,
+  "name": "slow-query",
+  "transport": "http",
+  "route": "POST /ingest/{project}/query",
+  "project": "wire",
+  "headers": { "content-type": "application/json" },
+  "body": {
+    "sql": "select * from chapters where id = 7",
+    "time_ms": 123.5,
+    "environment": "production",
+    "connection": "mysql"
+  },
+  "expect": {
+    "status": 202,
+    "assert": "query",
+    "sql": "select * from chapters where id = <n>",
+    "duration_ms": 123.5
+  }
+}

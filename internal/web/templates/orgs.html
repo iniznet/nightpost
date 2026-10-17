@@ -1,0 +1,53 @@
+{{define "title"}}Organizations — fenrirealm-monitor{{end}}
+{{define "content"}}
+<h1>Organizations</h1>
+<p class="faint">An org groups projects. Assignment is additive: a project keeps its key and its producer configuration — only the dashboard projection changes. Every project not assigned here belongs to <b>Default</b>.</p>
+{{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}
+{{if .Error}}<p class="form-error">{{.Error}}</p>{{end}}
+<form class="filterbar" method="post" action="/orgs/create">
+  <span class="label">new org</span>
+  <input name="name" placeholder="Name" required>
+  <input name="slug" placeholder="slug (optional)">
+  <button>Create</button>
+</form>
+<h2>Orgs</h2>
+{{if .Orgs}}
+<table>
+<thead><tr><th>Name</th><th>Slug</th><th>Projects</th><th>Members</th><th>Created</th></tr></thead>
+<tbody>
+{{range .Orgs}}
+<tr>
+  <td><a href="{{tl $.Toolbar "/" "org" .Slug}}">{{.Name}}</a></td>
+  <td class="mono dim">{{.Slug}}</td>
+  <td class="num">{{.Projects}}</td>
+  <td class="num">{{.Members}}</td>
+  <td class="dim nowrap">{{if .CreatedAt.IsZero}}—{{else}}{{rel .CreatedAt}}{{end}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{else}}<p class="empty">No orgs yet.</p>{{end}}
+<h2>Project assignment</h2>
+{{if .ProjectRows}}
+<table>
+<thead><tr><th>Project</th><th>Ingest key</th><th>Org</th><th></th></tr></thead>
+<tbody>
+{{range .ProjectRows}}
+<tr>
+  <td class="mono">{{.Key}}</td>
+  <td>{{if .HasKey}}<span class="pill">set</span>{{else}}<span class="dim">unsigned (legacy)</span>{{end}}</td>
+  <td>
+    <form method="post" action="/orgs/assign" class="filterbar" style="margin:0">
+      <input type="hidden" name="project" value="{{.Key}}">
+      <select name="org">
+        {{$cur := index $.ProjectOrg .Key}}
+        {{range $.Orgs}}<option value="{{.Slug}}"{{if eq .ID $cur}} selected{{end}}>{{.Name}}</option>{{end}}
+      </select>
+  </td>
+  <td><button type="submit">Move</button></form></td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{else}}<p class="empty">No projects yet — they are provisioned from ingest traffic.</p>{{end}}
+{{end}}

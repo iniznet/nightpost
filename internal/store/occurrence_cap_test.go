@@ -4,7 +4,7 @@ import "testing"
 
 func TestOccurrenceCapCountAndDiscard(t *testing.T) {
 	st := newTestStore(t)
-	st.MaxOccPerMin = 2
+	st.MaxOccPerMin.Store(2)
 
 	fp := ForException("LoopError", "hydration loop", "app:render")
 	var id int64

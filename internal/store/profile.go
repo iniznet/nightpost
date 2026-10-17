@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"time"
 )
@@ -95,6 +96,7 @@ type RouteAgg struct {
 	Count    int64
 	TotalMs  float64
 	AvgMs    float64
+	P50Ms    float64
 	P95Ms    float64
 	MaxMs    float64
 	LastSeen time.Time
@@ -318,6 +320,7 @@ func (s *Store) ProfileRouteStats(projectKey, typ string, hours, limit int) ([]R
 	for name, a := range byName {
 		sort.Float64s(a.durs)
 		ra := RouteAgg{Name: name, Count: a.n, TotalMs: a.sum, AvgMs: a.sum / float64(a.n), MaxMs: a.max, LastSeen: time.Unix(a.last, 0)}
+		ra.P50Ms = a.durs[min(int(a.n)-1, int(a.n*50/100))]
 		ra.P95Ms = a.durs[min(int(a.n)-1, int(a.n*95/100))]
 		out = append(out, ra)
 	}
@@ -354,14 +357,36 @@ func (s *Store) ProfilesFiltered(projectKey, typ, nameLike string, limit int) ([
 	return out, rows.Err()
 }
 
-// PruneProfiles keeps the profile table bounded: the newest keep rows survive.
+// PruneProfiles keeps the profile table bounded PER PROJECT: every project
+// keeps its newest `keep` rows. A single global keep-window let one noisy
+// producer evict every other org's profiles and traces — the M6.2 acceptance
+// add — so the partition is by project_key, never by table.
+//
+// The delete is chunked and ranked by a window function, so each statement
+// stays bounded on the single writer instead of one whole-table pass.
 func (s *Store) PruneProfiles(keep int64) error {
 	if keep <= 0 {
 		keep = 5000
 	}
-	_, err := s.wdb.Exec(`DELETE FROM profiles WHERE id NOT IN
-		(SELECT id FROM profiles ORDER BY created_at DESC, id DESC LIMIT ?)`, keep)
-	return err
+	const chunk = 500
+	for {
+		res, err := s.wdb.Exec(`DELETE FROM profiles WHERE id IN (
+			SELECT id FROM (
+				SELECT id, ROW_NUMBER() OVER (
+					PARTITION BY project_key ORDER BY created_at DESC, id DESC) AS rn
+				FROM profiles
+			) WHERE rn > ? LIMIT ?)`, keep, chunk)
+		if err != nil {
+			return fmt.Errorf("prune profiles: %w", err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n < chunk {
+			return nil
+		}
+	}
 }
 
 type profileScanner interface{ Scan(dest ...any) error }
@@ -389,6 +414,68 @@ func (s *Store) ProfilesByTrace(traceID string, limit int) ([]Profile, error) {
 			return nil, err
 		}
 		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// TraceSummary is one row of the /traces index: a cross-service request's
+// legs folded into the figures the index renders. HasTree marks a trace with
+// at least one pruned call tree, so the index can show the drill-down affordance
+// before the reader opens the waterfall.
+type TraceSummary struct {
+	TraceID   string
+	Legs      int
+	Projects  string
+	RootName  string
+	TotalMs   float64
+	HasTree   bool
+	FirstSeen time.Time
+	LastSeen  time.Time
+}
+
+// Traces lists distinct trace ids of a project inside the window, newest
+// first. The window carries a time bound and the row cap keeps the group
+// aggregate bounded (the 70100-wedge class: no unbounded scan).
+func (s *Store) Traces(projectKey string, hours, limit int) ([]TraceSummary, error) {
+	if hours <= 0 || hours > 720 {
+		hours = 24
+	}
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	cutoff := time.Now().Add(-time.Duration(hours) * time.Hour).Unix()
+	rows, err := s.rdb.Query(`SELECT trace_id,
+			COUNT(*),
+			GROUP_CONCAT(DISTINCT project_key),
+			SUM(duration_ms),
+			MAX(CASE WHEN tree <> '' AND tree IS NOT NULL AND tree <> 'null' AND tree <> '[]' THEN 1 ELSE 0 END),
+			MIN(created_at), MAX(created_at),
+			(SELECT p2.name FROM profiles p2 WHERE p2.trace_id = p.trace_id ORDER BY p2.created_at ASC, p2.id ASC LIMIT 1)
+		FROM profiles p
+		WHERE trace_id <> '' AND (? = '' OR project_key = ?) AND created_at >= ?
+		GROUP BY trace_id
+		ORDER BY MAX(created_at) DESC
+		LIMIT ?`, projectKey, projectKey, cutoff, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []TraceSummary
+	for rows.Next() {
+		var ts TraceSummary
+		var projects sql.NullString
+		var root sql.NullString
+		var hasTree int64
+		var first, last int64
+		if err := rows.Scan(&ts.TraceID, &ts.Legs, &projects, &ts.TotalMs, &hasTree, &first, &last, &root); err != nil {
+			return nil, err
+		}
+		ts.Projects = projects.String
+		ts.RootName = root.String
+		ts.HasTree = hasTree == 1
+		ts.FirstSeen = time.Unix(first, 0)
+		ts.LastSeen = time.Unix(last, 0)
+		out = append(out, ts)
 	}
 	return out, rows.Err()
 }

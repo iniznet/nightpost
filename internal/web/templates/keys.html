@@ -2,20 +2,31 @@
 {{define "content"}}
 <h1>Ingest keys</h1>
 <p class="faint">Per-project bearer keys for every ingest route. A project without a key still accepts unsigned (legacy) traffic; rotating or revoking takes effect immediately — update the producer env in the same window. Revoking drops the project back to unsigned (legacy) admission.</p>
+<p class="faint">The <b>Browser origin</b> column is the allowlist for in-page reporters (the profile/error routes). Leave it empty to inherit the install default set by <code class="mono">-cors-origin</code>; a wildcard is refused, because these routes accept unauthenticated browser posts.</p>
 {{if .NewKey}}
 <div class="flash">New key for <b class="mono">{{.NewKeyProject}}</b>: <code class="mono">{{.NewKey}}</code> — copy it now, it is shown once.</div>
 {{end}}
 {{if .Revoked}}
 <div class="flash">Key revoked for <b class="mono">{{.Revoked}}</b> — the project now accepts unsigned (legacy) traffic again.</div>
 {{end}}
+{{if .OriginSaved}}
+<div class="flash">Browser origin saved for <b class="mono">{{.OriginSaved}}</b>{{if .OriginValue}} — <code class="mono">{{.OriginValue}}</code>{{else}} — inherits the install default.{{end}}</div>
+{{end}}
 {{if .ProjectRows}}
 <table>
-<thead><tr><th>Project</th><th>Ingest key</th><th>Rotated</th><th></th></tr></thead>
+<thead><tr><th>Project</th><th>Ingest key</th><th>Browser origin</th><th>Rotated</th><th></th></tr></thead>
 <tbody>
 {{range .ProjectRows}}
 <tr>
   <td class="mono">{{.Key}}</td>
   <td>{{if .HasKey}}<span class="pill">set</span>{{else}}<span class="dim">unsigned (legacy)</span>{{end}}</td>
+  <td>
+    <form method="post" action="/keys/origin" class="origin-form">
+      <input type="hidden" name="project" value="{{.Key}}">
+      <input type="text" name="cors_origin" value="{{.CORSOrigin}}" placeholder="inherit default" size="22">
+      <button type="submit">Save</button>
+    </form>
+  </td>
   <td class="dim">{{if .RotatedAt.IsZero}}—{{else}}{{rel .RotatedAt}}{{end}}</td>
   <td class="actions">
     <form method="post" action="/keys/rotate">

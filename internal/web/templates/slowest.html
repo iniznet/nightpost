@@ -1,7 +1,21 @@
-{{define "title"}}Slowest code — fenrirealm-monitor{{end}}
+{{define "title"}}Hotspots — fenrirealm-monitor{{end}}
+{{define "subtabs"}}
+<div class="tabs">
+  <a href="{{tl .Toolbar "/performance"}}" class="tab{{if or (eq .Page "performance") (eq .Page "profiles")}} on{{end}}">Endpoints</a>
+  <a href="{{tl .Toolbar "/performance" "tab" "traces"}}" class="tab{{if eq .Page "traces"}} on{{end}}">Traces</a>
+  <a href="{{tl .Toolbar "/performance" "tab" "hotspots"}}" class="tab{{if eq .Page "slowest"}} on{{end}}">Hotspots</a>
+</div>
+{{end}}
 {{define "content"}}
-<h1>Slowest code</h1>
-<p class="faint">Self-time leaderboard aggregated across the most recent callgraph profiles of this project.</p>
+<h1>Hotspots</h1>
+<p class="faint">Self-time leaderboard aggregated across the most recent callgraph profiles. Proportion is self time relative to the worst <em>shown</em> function; the app/framework scope isolates your own code from vendor frames.</p>
+<div class="filterbar">
+  <span class="label">scope</span>
+  <a href="{{tl .Toolbar .Path "scope" "" "page" ""}}" class="pill{{if eq .Scope "all"}} on{{end}}">all</a>
+  <a href="{{tl .Toolbar .Path "scope" "app" "page" ""}}" class="pill{{if eq .Scope "app"}} on{{end}}">app</a>
+  <a href="{{tl .Toolbar .Path "scope" "framework" "page" ""}}" class="pill{{if eq .Scope "framework"}} on{{end}}">framework</a>
+  <span class="faint">{{.Total}} functions</span>
+</div>
 {{if .Rows}}
 <table>
 <thead><tr><th>Function</th><th>File</th><th>Hottest sample</th><th>Total self</th><th>Avg</th><th>Samples</th><th>Last seen</th></tr></thead>
@@ -10,14 +24,21 @@
 <tr>
   <td class="mono" title="{{.Function}}">{{fn .Function}}</td>
   <td class="mono dim">{{or .File "—"}}</td>
-  <td class="mono dim">{{if .SampleProfileID}}<a href="/profiles/{{.SampleProfileID}}">{{or .SampleProfile "profile"}}</a>{{else}}—{{end}}</td>
-  <td class="num"><span class="inline-bar"><span class="fill hot-fill" style="width:{{pct .TotalSelfMs $.MaxSelf}}%"></span></span><span class="mono">{{ms .TotalSelfMs}}</span></td>
-  <td class="num">{{ms .AvgSelfMs}}</td>
+  <td class="mono dim">{{if .SampleProfileID}}<a href="/profiles/{{.SampleProfileID}}">{{if .SampleProfile}}{{.SampleProfile}}{{else}}sample{{end}} #{{.SampleProfileID}}</a>{{else}}—{{end}}</td>
+  <td class="num nowrap"><span class="inline-bar"><span class="fill hot-fill" style="width:{{pct .TotalSelfMs $.MaxSelf}}%"></span></span><span class="mono">{{ms .TotalSelfMs}}</span></td>
+  <td class="num nowrap">{{ms .AvgSelfMs}}</td>
   <td class="num">{{.Samples}}</td>
-  <td class="dim" title="{{.LastSeen.Format "2006-01-02 15:04:05"}}">{{rel .LastSeen}}</td>
+  <td class="dim nowrap" title="{{.LastSeen.Format "2006-01-02 15:04:05"}}">{{rel .LastSeen}}</td>
 </tr>
 {{end}}
 </tbody>
 </table>
-{{else}}<p class="empty">No callgraph profiles recorded yet.</p>{{end}}
+{{else}}<p class="empty">No callgraph profiles recorded yet for this scope.</p>{{end}}
+{{if or .PrevURL .NextURL}}
+<p class="pager">
+  {{if .PrevURL}}<a href="{{.PrevURL}}">← Newer</a>{{end}}
+  <span class="faint">page {{.PageNum}}</span>
+  {{if .NextURL}}<a href="{{.NextURL}}">Older →</a>{{end}}
+</p>
+{{end}}
 {{end}}

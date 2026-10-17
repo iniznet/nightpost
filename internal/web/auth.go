@@ -26,6 +26,11 @@ type Auth struct {
 	setupTmpl *template.Template
 	loginTmpl *template.Template
 
+	// forceSecure is declared by the operator for the reverse-proxy topology,
+	// where the connection to this server is plain HTTP but the browser spoke
+	// TLS (M6.5).
+	forceSecure bool
+
 	mu      sync.Mutex
 	failers map[string]*failRecord
 }
@@ -113,21 +118,38 @@ func (a *Auth) Gate(next http.Handler) http.Handler {
 	})
 }
 
-func (a *Auth) setSession(w http.ResponseWriter, email string) {
+// SetCookieSecure declares that browser requests reach this server over TLS
+// even though the connection here is plain HTTP — the reverse-proxy topology.
+//
+// The operator must declare it; it is never inferred from X-Forwarded-Proto,
+// because that header is caller-controlled exactly like X-Forwarded-For, and
+// trusting it would let a plain-HTTP request mint a cookie the browser then
+// sends in the clear (M6.5).
+func (a *Auth) SetCookieSecure(v bool) { a.forceSecure = v }
+
+// cookieSecure marks the session cookie Secure when the request itself is TLS,
+// or when the operator declared a TLS proxy in front.
+func (a *Auth) cookieSecure(r *http.Request) bool {
+	return a.forceSecure || (r != nil && r.TLS != nil)
+}
+
+func (a *Auth) setSession(w http.ResponseWriter, r *http.Request, email string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    a.sessionValue(email),
 		Path:     "/",
 		Expires:  time.Now().Add(sessionTTL),
 		HttpOnly: true,
+		Secure:   a.cookieSecure(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 }
 
-func (a *Auth) clearSession(w http.ResponseWriter) {
+func (a *Auth) clearSession(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
 		Name: sessionCookieName, Value: "", Path: "/",
-		MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode,
+		MaxAge: -1, HttpOnly: true, Secure: a.cookieSecure(r),
+		SameSite: http.SameSiteLaxMode,
 	})
 }
 
@@ -195,7 +217,7 @@ func (a *Auth) HandleSetupPOST(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Printf("first admin account created for %q — setup is now locked", email)
-	a.setSession(w, email)
+	a.setSession(w, r, email)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
@@ -235,7 +257,7 @@ func (a *Auth) HandleLoginPOST(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.clearFails(key)
-	a.setSession(w, email)
+	a.setSession(w, r, email)
 	http.Redirect(w, r, next, http.StatusSeeOther)
 }
 
@@ -247,7 +269,7 @@ func (a *Auth) HandleLogout(w http.ResponseWriter, r *http.Request) {
 			log.Printf("logout revoke for %q: %v", email, err)
 		}
 	}
-	a.clearSession(w)
+	a.clearSession(w, r)
 	http.Redirect(w, r, "/login", http.StatusFound)
 }
 

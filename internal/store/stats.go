@@ -44,8 +44,18 @@ func (s *Store) HourBuckets(project string, hours int, typ string) ([]int64, err
 	}
 	now := time.Now().Unix()
 	cutoff := now - int64(hours)*3600
+	// Drive from ISSUES, not from occurrences (M6.4, measured). Written the other
+	// way the planner scanned occurrences by seen_at and looked up the clustered
+	// row per match to reach project/type: 213ms over a realistic 200k-occurrence
+	// day, the slowest dashboard query by an order of magnitude. Filtering the
+	// smaller table first lets the planner reach each issue's occurrences through
+	// the existing covering (issue_id, seen_at DESC) index, which carries seen_at
+	// itself — so the window filter and the bucket are both answered in the index.
+	// This costs nothing on the write path, unlike a new index (measured: a
+	// (seen_at, issue_id) composite bought 87ms here but took 31% of ingest
+	// throughput and doubled two list queries).
 	rows, err := s.rdb.Query(`SELECT (o.seen_at/3600)*3600 AS b, COUNT(*)
-		FROM occurrences o JOIN issues i ON i.id = o.issue_id
+		FROM issues i JOIN occurrences o ON o.issue_id = i.id
 		WHERE (? = '' OR i.project_key = ?)
 		  AND (? = '' OR i.type = ?)
 		  AND o.seen_at >= ?
@@ -77,21 +87,21 @@ func (s *Store) HourBuckets(project string, hours int, typ string) ([]int64, err
 func (s *Store) OpenIssueCount(project string) (int64, error) {
 	var n int64
 	err := s.rdb.QueryRow(`SELECT COUNT(*) FROM issues
-		WHERE resolved = 0 AND (? = '' OR project_key = ?)`, project, project).Scan(&n)
+		WHERE resolved = 0 AND archived_at = 0 AND (? = '' OR project_key = ?)`, project, project).Scan(&n)
 	return n, err
 }
 
 // IssueTotal counts all issues for a project.
 func (s *Store) IssueTotal(project string) (int64, error) {
 	var n int64
-	err := s.rdb.QueryRow(`SELECT COUNT(*) FROM issues WHERE (? = '' OR project_key = ?)`, project, project).Scan(&n)
+	err := s.rdb.QueryRow(`SELECT COUNT(*) FROM issues WHERE archived_at = 0 AND (? = '' OR project_key = ?)`, project, project).Scan(&n)
 	return n, err
 }
 
 // LogLevels aggregates issue counts per level for the log stream filter.
 func (s *Store) LogLevels(project string) ([]LevelCount, error) {
 	rows, err := s.rdb.Query(`SELECT COALESCE(level, 'info'), COUNT(*) FROM issues
-		WHERE type = 'log' AND (? = '' OR project_key = ?)
+		WHERE type = 'log' AND archived_at = 0 AND (? = '' OR project_key = ?)
 		GROUP BY level ORDER BY COUNT(*) DESC`, project, project)
 	if err != nil {
 		return nil, err
@@ -167,6 +177,78 @@ func (s *Store) RequestStats(project string, hours int) (count int64, p50, p95 f
 		routes = routes[:8]
 	}
 	return count, p50, p95, routes, nil
+}
+
+// LatencyDelta is the p95 of the current window beside the p95 of the
+// equal-length window immediately before it — the "is it getting worse?"
+// figure the dashboard triage cards render.
+type LatencyDelta struct {
+	Now  float64
+	Prev float64
+}
+
+// DeltaPct is the relative change in percent; 0 when there is no baseline.
+func (d LatencyDelta) DeltaPct() float64 {
+	if d.Prev <= 0 {
+		return 0
+	}
+	return (d.Now - d.Prev) / d.Prev * 100
+}
+
+// RequestP95Delta computes the trailing-window p95 beside the p95 of the
+// preceding equal-length window for one project. The read is bounded to the
+// two windows and capped at maxStatsRows, so it stays an index range rather
+// than a table scan.
+func (s *Store) RequestP95Delta(project string, hours int) (LatencyDelta, error) {
+	if hours <= 0 || hours > 168 {
+		hours = 24
+	}
+	now := time.Now()
+	rows, err := s.rdb.Query(`SELECT duration_ms, created_at FROM profiles
+		WHERE type = 'request' AND (? = '' OR project_key = ?) AND created_at >= ?
+		ORDER BY created_at DESC LIMIT ?`,
+		project, project, now.Add(-2*time.Duration(hours)*time.Hour).Unix(), maxStatsRows)
+	if err != nil {
+		return LatencyDelta{}, err
+	}
+	defer rows.Close()
+	split := now.Add(-time.Duration(hours) * time.Hour).Unix()
+	var cur, prev []float64
+	for rows.Next() {
+		var ms float64
+		var created int64
+		if err := rows.Scan(&ms, &created); err != nil {
+			return LatencyDelta{}, err
+		}
+		if created >= split {
+			cur = append(cur, ms)
+		} else {
+			prev = append(prev, ms)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return LatencyDelta{}, err
+	}
+	return LatencyDelta{Now: percentile95(cur), Prev: percentile95(prev)}, nil
+}
+
+func percentile95(v []float64) float64 {
+	if len(v) == 0 {
+		return 0
+	}
+	sort.Float64s(v)
+	return v[min(len(v)-1, len(v)*95/100)]
+}
+
+// OpenIssuesSince counts unresolved issues first seen at or after `since`
+// (unix seconds) for one project — the "new since release" triage figure.
+// A zero `since` counts every open issue.
+func (s *Store) OpenIssuesSince(project string, since int64) (int64, error) {
+	var n int64
+	err := s.rdb.QueryRow(`SELECT COUNT(*) FROM issues
+		WHERE resolved = 0 AND archived_at = 0 AND (? <= 0 OR first_seen_at >= ?) AND (? = '' OR project_key = ?)`,
+		since, since, project, project).Scan(&n)
+	return n, err
 }
 
 // IssueSparklines returns trailing-hour occurrence buckets per issue id for
@@ -315,7 +397,7 @@ func (s *Store) DashboardSummaries(hours int) ([]DashboardRow, error) {
 	rows.Close()
 
 	rows, err = s.rdb.Query(`SELECT project_key, COUNT(*) FROM issues
-		WHERE resolved = 0 GROUP BY project_key`)
+		WHERE resolved = 0 AND archived_at = 0 GROUP BY project_key`)
 	if err != nil {
 		return nil, err
 	}

@@ -1,0 +1,46 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: vet
+        run: go vet ./...
+      - name: test
+        run: go test ./...
+      # The Windows dev host has no C compiler, so -race cannot run there
+      # ("-race requires cgo"). Ubuntu runners have one, which is why the race
+      # detector lives HERE: the keygate's bounded set, the shaper buckets and
+      # the gate itself are shared mutable state on the ingest hot path.
+      - name: race
+        run: go test -race ./...
+      # The shipped binary is static (CGO off) — assert that here, or the
+      # Dockerfile's alpine runtime stage would fail only at release time.
+      - name: static build
+        run: CGO_ENABLED=0 GOOS=linux go build -trimpath -o /dev/null ./cmd/monitor
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: build image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

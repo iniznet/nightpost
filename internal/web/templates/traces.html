@@ -1,0 +1,30 @@
+{{define "title"}}Traces — fenrirealm-monitor{{end}}
+{{define "subtabs"}}
+<div class="tabs">
+  <a href="{{tl .Toolbar "/performance"}}" class="tab">Endpoints</a>
+  <a href="{{tl .Toolbar "/performance" "tab" "traces"}}" class="tab on">Traces</a>
+  <a href="{{tl .Toolbar "/performance" "tab" "hotspots"}}" class="tab">Hotspots</a>
+</div>
+{{end}}
+{{define "content"}}
+<h1>Traces</h1>
+<p class="faint">One row per cross-service request: every leg that carried the same trace id, stitched into a waterfall. The <span class="badge">tree</span> badge marks a trace with a pruned call tree to drill into. Call trees are folded at depth {{.DeepCap}} with subtrees under 1% of the leg folded into their parent's self time.</p>
+{{if .Traces}}
+<table>
+<thead><tr><th>Trace</th><th>Route</th><th>Projects</th><th>Legs</th><th>Total</th><th></th><th>Last seen</th></tr></thead>
+<tbody>
+{{range .Traces}}
+<tr>
+  <td class="mono"><a href="/traces/{{.TraceID}}">{{trunc .TraceID 14}}</a></td>
+  <td class="mono">{{or .RootName "—"}}</td>
+  <td class="dim">{{.Projects}}</td>
+  <td class="num">{{.Legs}}</td>
+  <td class="num"><span class="mono">{{ms .TotalMs}}</span></td>
+  <td>{{if .HasTree}}<span class="badge">tree</span>{{else}}<span class="faint">—</span>{{end}}</td>
+  <td class="dim" title="{{.LastSeen.Format "2006-01-02 15:04:05"}}">{{rel .LastSeen}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{else}}<p class="empty">No traces in this window. Cross-service traces appear once a producer sends <span class="mono">X-Monitor-Trace-Id</span> (or a W3C <span class="mono">traceparent</span>).</p>{{end}}
+{{end}}

@@ -20,9 +20,12 @@ type Store struct {
 	wdb *sql.DB
 	rdb *sql.DB
 
-	limMu        sync.Mutex
-	limWindows   map[string]*limWindow
-	MaxOccPerMin int
+	limMu      sync.Mutex
+	limWindows map[string]*limWindow
+	// MaxOccPerMin is the live per-fingerprint occurrence cap. It is atomic
+	// because the retention loop re-reads it from settings while ingest reads
+	// it on every event (M6.3).
+	MaxOccPerMin atomic.Int64
 
 	dropped atomic.Int64
 }
@@ -36,7 +39,7 @@ type limWindow struct {
 // per minute; past the cap the occurrence insert is skipped while the issue
 // upsert still runs, so issue counts stay accurate without row flooding.
 func (s *Store) allowOccurrence(fingerprint string) bool {
-	capPerMin := s.MaxOccPerMin
+	capPerMin := int(s.MaxOccPerMin.Load())
 	if capPerMin <= 0 {
 		return true
 	}
@@ -147,7 +150,19 @@ CREATE INDEX IF NOT EXISTS idx_occurrences_issue ON occurrences(issue_id, seen_a
 		rdb.Close()
 		return nil, err
 	}
-	s := &Store{wdb: wdb, rdb: rdb, limWindows: map[string]*limWindow{}, MaxOccPerMin: 30}
+	s := &Store{wdb: wdb, rdb: rdb, limWindows: map[string]*limWindow{}}
+	s.MaxOccPerMin.Store(30)
+	// M6.2: the default org and its memberships are seeded BEFORE projects are
+	// auto-provisioned, so a producer admitted on first sight already has an
+	// org to land in and an upgraded volume is never orphaned.
+	if err := s.EnsureDefaultOrg(); err != nil {
+		s.Close()
+		return nil, fmt.Errorf("seed default org: %w", err)
+	}
+	if err := s.SeedMemberships(); err != nil {
+		s.Close()
+		return nil, fmt.Errorf("seed org memberships: %w", err)
+	}
 	// Auto-provision the projects table from existing event rows so upgraded
 	// volumes carry their producers as unsigned legacy projects (#157).
 	if err := s.ProvisionProjects(); err != nil {
@@ -164,6 +179,11 @@ func migrate(db *sql.DB) error {
 	for _, m := range []struct{ name, stmt string }{
 		{"issues.channel", `ALTER TABLE issues ADD COLUMN channel TEXT NOT NULL DEFAULT ''`},
 		{"idx_issues_type", `CREATE INDEX IF NOT EXISTS idx_issues_type ON issues(type, last_seen_at DESC)`},
+		// M6.4 measured a covering composite here (seen_at, issue_id) as a NET LOSS:
+		// HourBuckets 213ms -> 87ms, but ingest throughput fell 9,533 -> 6,561
+		// events/s and the two issue-list queries doubled (4.6 -> 9.4ms, 23.6 ->
+		// 43.3ms). One more index on the hottest table costs more than one query
+		// gains, so it is NOT added. The bare (seen_at) index stays.
 		{"idx_occurrences_seen", `CREATE INDEX IF NOT EXISTS idx_occurrences_seen ON occurrences(seen_at)`},
 		{"profiles.trace_id", `ALTER TABLE profiles ADD COLUMN trace_id TEXT NOT NULL DEFAULT ''`},
 		{"idx_profiles_trace", `CREATE INDEX IF NOT EXISTS idx_profiles_trace ON profiles(trace_id, created_at DESC)`},
@@ -180,6 +200,12 @@ func migrate(db *sql.DB) error {
 	created_at INTEGER NOT NULL DEFAULT 0,
 	sessions_valid_after INTEGER NOT NULL DEFAULT 0)`},
 		{"issues.resolved_at", `ALTER TABLE issues ADD COLUMN resolved_at INTEGER NOT NULL DEFAULT 0`},
+		// M6.4: the issues table IS the defect list and is never pruned, while every
+		// distinct log message adds a row (measured: 20,000 rows for one chatty app
+		// on one day of real volume). Archiving is what bounds it — see
+		// ArchiveStaleIssues. The archive guard on the read side is spelled at each
+		// of the dashboard's issue queries — see the comment above IssueQuery.
+		{"issues.archived_at", `ALTER TABLE issues ADD COLUMN archived_at INTEGER NOT NULL DEFAULT 0`},
 		{"alerts_log", `CREATE TABLE IF NOT EXISTS alerts_log (
 	id INTEGER PRIMARY KEY,
 	channel TEXT NOT NULL,
@@ -227,6 +253,24 @@ func migrate(db *sql.DB) error {
 		{"idx_releases", `CREATE INDEX IF NOT EXISTS idx_releases ON releases(project_key, released_at DESC)`},
 		{"occ_user_id", `ALTER TABLE occurrences ADD COLUMN user_id TEXT NOT NULL DEFAULT ''`},
 		{"idx_occ_user", `CREATE INDEX IF NOT EXISTS idx_occ_user ON occurrences(issue_id, user_id)`},
+		{"orgs", `CREATE TABLE IF NOT EXISTS orgs (
+	id INTEGER PRIMARY KEY,
+	name TEXT NOT NULL,
+	slug TEXT NOT NULL UNIQUE,
+	created_at INTEGER NOT NULL DEFAULT 0)`},
+		{"org_members", `CREATE TABLE IF NOT EXISTS org_members (
+	org_id INTEGER NOT NULL,
+	user_id INTEGER NOT NULL,
+	role TEXT NOT NULL DEFAULT 'viewer',
+	created_at INTEGER NOT NULL DEFAULT 0,
+	PRIMARY KEY(org_id, user_id))`},
+		{"projects.org_id", `ALTER TABLE projects ADD COLUMN org_id INTEGER NOT NULL DEFAULT 1`},
+		{"idx_projects_org", `CREATE INDEX IF NOT EXISTS idx_projects_org ON projects(org_id)`},
+		{"projects.cors_origin", `ALTER TABLE projects ADD COLUMN cors_origin TEXT NOT NULL DEFAULT ''`},
+		{"settings", `CREATE TABLE IF NOT EXISTS settings (
+	key TEXT PRIMARY KEY,
+	value TEXT NOT NULL,
+	updated_at INTEGER NOT NULL DEFAULT 0)`},
 	} {
 		if _, err := db.Exec(m.stmt); err != nil {
 			// Idempotent: only "already applied" failures may pass through.
@@ -237,6 +281,14 @@ func migrate(db *sql.DB) error {
 		}
 	}
 	return nil
+}
+
+// Ping reports whether the read pool answers. The readiness probe needs a
+// real query rather than a cached handle, because a store whose file vanished
+// still hands out connections (M6.5).
+func (s *Store) Ping() error {
+	var one int
+	return s.rdb.QueryRow(`SELECT 1`).Scan(&one)
 }
 
 func (s *Store) Close() error {
@@ -260,7 +312,8 @@ func (s *Store) RecordError(projectKey, exceptionClass, message, fingerprint, en
 		(project_key, fingerprint, type, title, exception_class, level, environment, count, first_seen_at, last_seen_at)
 		VALUES (?, ?, 'error', ?, ?, ?, ?, 1, ?, ?)
 		ON CONFLICT(project_key, fingerprint) DO UPDATE SET
-			count = count + 1, last_seen_at = excluded.last_seen_at
+			count = count + 1, last_seen_at = excluded.last_seen_at,
+			archived_at = 0
 		RETURNING id`,
 		projectKey, fingerprint, truncate(message, 240), exceptionClass, level, environment, now, now).Scan(&issueID)
 	if err != nil {
@@ -286,7 +339,8 @@ func (s *Store) RecordLog(projectKey, channel, level, message string, context ma
 		(project_key, fingerprint, type, title, exception_class, level, environment, channel, count, first_seen_at, last_seen_at)
 		VALUES (?, ?, 'log', ?, NULL, ?, ?, ?, 1, ?, ?)
 		ON CONFLICT(project_key, fingerprint) DO UPDATE SET
-			count = count + 1, last_seen_at = excluded.last_seen_at
+			count = count + 1, last_seen_at = excluded.last_seen_at,
+			archived_at = 0
 		RETURNING id`,
 		projectKey, fp, truncate(message, 240), level, environment, channel, now, now).Scan(&issueID)
 	if err != nil {
@@ -320,6 +374,22 @@ func (s *Store) insertOccurrence(issueID int64, kind string, payload any, now in
 	}
 	return nil
 }
+
+// The archive guard `archived_at = 0` sits on the dashboard's issue READS: the
+// issue list, the open/total counts, the log level counts, "new since release"
+// and the per-project overview counts (M6.4). Retention already deleted an
+// archived issue's occurrences, so it contributes to no chart, and leaving it in
+// the counts while the list omitted it would be worse than either choice.
+//
+// It is written into each query rather than shared as a constant on purpose:
+// these are Go RAW-STRING literals, so a concatenated const lands in the SQL as
+// literal text rather than as a predicate — which is exactly how an earlier
+// revision of this change broke the issue list without failing to compile.
+//
+// Deliberately NOT applied to project/org DISCOVERY (Projects, ProjectsInOrg),
+// because a project whose issues are all archived must stay discoverable —
+// otherwise archiving could silently drop it from /keys. Nor to the alert-rule
+// reads, which evaluate their own recent-activity windows.
 
 // IssueQuery selects issues for the UI: every zero-value field is a no-op
 // filter, Status is "open", "resolved" or "all" (empty = all), Sort is
@@ -369,7 +439,7 @@ func (s *Store) Issues(q IssueQuery) ([]Issue, error) {
 		  AND (? = '' OR channel = ?)
 		  AND (? = '' OR title LIKE '%' || ? || '%')
 		  AND (CASE ? WHEN 'open' THEN resolved = 0 WHEN 'resolved' THEN resolved = 1 ELSE 1 END)
-		  AND (? <= 0 OR first_seen_at >= ?)
+		  AND archived_at = 0 AND (? <= 0 OR first_seen_at >= ?)
 	`+cursor+`
 		`+order+` LIMIT ?`,
 		args...)
