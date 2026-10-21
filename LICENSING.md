@@ -2,15 +2,17 @@
 
 ## Decision
 
-**Open-core.** The self-hosted server in this repository is **Apache-2.0**. The
-producer packages (`nightpost/laravel` on Composer, `@nightpost/*` on npm) are
-**MIT**. The managed control plane (M6.9 - billing, tenant provisioning, limits)
-is a separate product, is not in this repository, and is therefore not covered
-by this grant.
+**Open-core.** The self-hosted server in this repository is **AGPL-3.0**
+(decided 2026-10-21, operator decision on iniznet/fenrirealm-tracker#278 -
+revised from the earlier Apache-2.0 plan before publication). The producer
+packages (`nightpost/laravel` on Composer, `@nightpost/*` on npm) are **MIT**.
+The managed control plane (M6.9 - billing, tenant provisioning, limits) is a
+separate product, is not in this repository, and is therefore not covered by
+this grant.
 
-`LICENSE` is the verbatim Apache-2.0 text. `NOTICE` carries the copyright line
-and the third-party component list that Apache-2.0 section 4(d) requires on
-distribution.
+`LICENSE` is the verbatim AGPL-3.0 text. `NOTICE` carries the copyright line
+and the third-party component list (the attribution the licence asks for on
+distribution).
 
 ## Why open-core, and why these two licences
 
@@ -20,19 +22,27 @@ server away permissively *is* the acquisition channel, so charging for the
 binary would undercut the argument. The paid product is the managed plane, not
 the binary.
 
-Apache-2.0 for the server rather than MIT because it carries an explicit patent
-grant and a trademark clause (section 6), which matters for a company-backed
-product others will redistribute. MIT for the packages because a package is
-adopted or it is not, and nothing in a package needs a patent clause.
+AGPL-3.0 for the server (operator decision, replacing the earlier Apache-2.0
+plan) because the network-copyleft clause (section 13) closes the one hole the
+anti-SaaS pitch leaves open: under a permissive licence, a competitor can take
+the whole binary and offer a hosted Nightwatch-class service without sharing
+their changes. AGPL makes hosted competitors play by the same rule the product
+preaches - run it yourself, share what you change - while self-hosting stays
+free and unchanged. MIT for the packages because a package is adopted or it is
+not, and nothing in a package needs a copyleft clause.
 
 ## Alternatives considered
 
 | Option | Why not |
 |---|---|
-| **BUSL / FSL** | Resale protection, but "source-available" is a confusing label to explain to the framework communities this targets and it blocks distro packaging outright. Revisit only if a reseller actually appears - and a relicence first needs the CLA question below settled. |
+| **BUSL / FSL** | Resale protection, but "source-available" is a confusing label to explain to the framework communities this targets and it blocks distro packaging outright. |
 | **Proprietary** | Slowest possible community growth, and it contradicts the "run it yourself" pitch. |
-| **AGPL** | Would repel exactly the ecosystem this is built to sit beside, for protection the open-core split already provides (the managed plane stays closed). |
-| **MIT everywhere** | Fine, but it gives up the patent grant on the server for no adoption gain. |
+| **Apache-2.0** (the earlier plan) | Leaves the hosted-service loophole open: a competitor could run a hosted Nightwatch-class service off this code and share nothing. Superseded by AGPL-3.0 at the operator's decision. |
+| **MIT everywhere** | Same loophole, and no copyleft protection on the server at all. |
+
+The AGPL trade is accepted on purpose: some commercial integrators will pass on
+an AGPL server. That is the filter working - the integrators this product wants
+are the ones self-hosting it, and self-hosting stays free under AGPL.
 
 ## Dependency licence audit
 
@@ -69,14 +79,14 @@ the claim true.
 ## What this grant does NOT cover
 
 - **The brand.** `Nightpost`, `nightpost.dev` and the logo are trademarks;
-  Apache-2.0 section 6 grants no trademark rights. A fork must rename.
+  AGPL-3.0 does not grant trademark rights. A fork must rename.
 - **The managed control plane** (M6.9). Not in this repository.
 - **The fenrirealm production instance.** Its data, deployment env and Dokploy
   configuration are private.
 
 ## Decided: DCO (2026-10-21)
 
-Apache-2.0 section 5 makes contributions inbound=outbound, which is all a
+AGPL-3.0 makes contributions inbound=outbound, which is all a
 permissively licensed project strictly needs. But it also means every outside
 contribution is irrevocable under the *current* licence: if a relicence were
 ever wanted (say to BUSL, on the evidence of a reseller), that contributor's
@@ -101,13 +111,15 @@ relicensing is now off the table after the first outside patch.
 Committing these files into a **private** repository changes nothing for anyone
 outside it: no grant has been made, and the files can be removed.
 
-**Publishing the fork under this licence is the irreversible act.** Apache-2.0
-section 2 grants a perpetual, irrevocable copyright licence for every copy
-distributed, so a published grant cannot be recalled. Confirm this decision
-before the repository or the packages become public, not after.
+**Publishing the fork under this licence is the irreversible act.** Copyright
+grants to distributed copies cannot be recalled, and AGPL-3.0 adds the section
+13 network obligation: anyone offering this server as a service must offer its
+source to the users of that service - the clause the product strategy now
+relies on. Confirm this decision before the repository or the packages become
+public, not after.
 
 **Decision recorded 2026-10-21** (operator, iniznet/fenrirealm-tracker#278):
-the fork repository and the producer packages go PUBLIC. The Apache-2.0 grant
+the fork repository and the producer packages go PUBLIC. The AGPL-3.0 grant
 takes effect the moment the visibility flips; a Packagist/npm publish later
 extends the same grant, it does not create a new one.
 

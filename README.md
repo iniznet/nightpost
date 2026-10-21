@@ -68,5 +68,5 @@ two ecosystems is the wedge, not breadth.
 
 ## Licence
 
-Apache-2.0 ([LICENSE](LICENSE), [NOTICE](NOTICE)). Producer packages are MIT.
+AGPL-3.0 ([LICENSE](LICENSE), [NOTICE](NOTICE)). Producer packages are MIT.
 The managed control plane is a separate product and is not in this repository.

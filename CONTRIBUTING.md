@@ -4,7 +4,7 @@ Thank you for considering a contribution. Two things you should know up front.
 
 ## Licence
 
-The server in this repository is Apache-2.0 (see LICENSE and NOTICE). The
+The server in this repository is AGPL-3.0 (see LICENSE and NOTICE). The
 producer packages (nightpost/laravel, @nightpost/*) are MIT. The managed
 control plane is a separate product and is not part of this repository.
 
@@ -12,7 +12,7 @@ control plane is a separate product and is not part of this repository.
 
 This project accepts contributions under the Developer Certificate of Origin
 (DCO, http://developercertificate.org). Every commit must carry a sign-off
-line proving you have the right to submit the patch under Apache-2.0:
+line proving you have the right to submit the patch under AGPL-3.0:
 
     Signed-off-by: Your Name <you@example.com>
 
