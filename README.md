@@ -63,7 +63,7 @@ two ecosystems is the wedge, not breadth.
 | [docs/README.md](docs/README.md) | docs index, and why there is no site generator |
 | [DEPLOY.md](DEPLOY.md) | install, ingress, upgrade, recovery |
 | [PRODUCT.md](PRODUCT.md) / [DESIGN.md](DESIGN.md) | what it is and how it is shaped |
-| [AGENTS.md](AGENTS.md) | the invariants this codebase is held to |
+| [AGENTS.md](AGENTS.md) | project explainer, layout, commands, standards pointers |
 
 ## Licence
 
