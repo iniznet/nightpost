@@ -68,7 +68,7 @@ two ecosystems is the wedge, not breadth.
 ## Licence
 
 AGPL-3.0 ([LICENSE](LICENSE), [NOTICE](NOTICE)). Producer packages are MIT
-(`nightpost/laravel`, `@nightpost/*`). Contributions are DCO-signed — see
+(`nightpost/laravel`, `@nightpost/*`). Contributions are welcome — see
 [CONTRIBUTING.md](CONTRIBUTING.md). The grant does not cover the Nightpost
 brand, the managed control plane (a separate product, not in this
 repository), or the operators' production deployment. Components linked into
