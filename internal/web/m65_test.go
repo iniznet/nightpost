@@ -14,7 +14,7 @@ type fakeInvalidator struct{ dropped []string }
 
 func (f *fakeInvalidator) Invalidate(project string) { f.dropped = append(f.dropped, project) }
 
-// TestKeyOriginSavesPerProjectAllowlist covers the M6.5 page contract: the
+// TestKeyOriginSavesPerProjectAllowlist covers the page contract: the
 // allowlist moved from one global flag onto the project row.
 func TestKeyOriginSavesPerProjectAllowlist(t *testing.T) {
 	st := openKeysStore(t)

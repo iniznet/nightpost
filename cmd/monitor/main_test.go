@@ -15,7 +15,7 @@ import (
 
 // TestReadyHandlerReportsOK pins the readiness contract's shape.
 // BuildRevision must always be present so "which build is deployed?" is
-// answerable from the endpoint (M6.5).
+// answerable from the endpoint.
 func TestReadyHandlerReportsOK(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
@@ -23,7 +23,7 @@ func TestReadyHandlerReportsOK(t *testing.T) {
 	}
 	defer st.Close()
 
-	// M6.10: the machine-readable leg also carries the ingest-rejection
+	// the machine-readable leg also carries the ingest-rejection
 	// counters, so a monitor can alert on them without scraping the UI.
 	health := web.IngestHealth{
 		ShaperRejections: func() int64 { return 7 },
@@ -88,7 +88,7 @@ func TestReadyHandlerReportsStoreFailure(t *testing.T) {
 	}
 }
 
-// TestResolveSessionSecretPersistsAcrossRestarts is the M6.5 installer
+// TestResolveSessionSecretPersistsAcrossRestarts is the installer
 // contract: the old random-per-boot default silently logged every admin out on
 // each deploy.
 func TestResolveSessionSecretPersistsAcrossRestarts(t *testing.T) {

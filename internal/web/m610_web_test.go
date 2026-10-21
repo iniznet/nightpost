@@ -10,7 +10,7 @@ import (
 	"github.com/iniznet/nightpost/internal/store"
 )
 
-// TestIngestHealthStripCountsEveryLeg pins the M6.10 footer contract: each
+// TestIngestHealthStripCountsEveryLeg pins the footer contract: each
 // ingest ceiling has its own counter, so "why is my data missing?" can be
 // answered per leg instead of with one opaque number.
 func TestIngestHealthStripCountsEveryLeg(t *testing.T) {

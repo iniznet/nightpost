@@ -15,7 +15,7 @@ import (
 	"github.com/iniznet/nightpost/internal/store"
 )
 
-// Auth gates every dashboard page behind a single-admin session (#157).
+// Auth gates every dashboard page behind a single-admin session .
 // Sessions are stateless HMAC-signed cookies (HttpOnly, SameSite=Lax):
 // no sessions table, so a restart cannot orphan logins, and revocation is
 // bounded by the TTL or a changed -session-secret. /setup stays open only
@@ -28,7 +28,7 @@ type Auth struct {
 
 	// forceSecure is declared by the operator for the reverse-proxy topology,
 	// where the connection to this server is plain HTTP but the browser spoke
-	// TLS (M6.5).
+	// TLS.
 	forceSecure bool
 
 	mu      sync.Mutex
@@ -124,7 +124,7 @@ func (a *Auth) Gate(next http.Handler) http.Handler {
 // The operator must declare it; it is never inferred from X-Forwarded-Proto,
 // because that header is caller-controlled exactly like X-Forwarded-For, and
 // trusting it would let a plain-HTTP request mint a cookie the browser then
-// sends in the clear (M6.5).
+// sends in the clear.
 func (a *Auth) SetCookieSecure(v bool) { a.forceSecure = v }
 
 // cookieSecure marks the session cookie Secure when the request itself is TLS,

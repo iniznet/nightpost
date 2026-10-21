@@ -9,7 +9,7 @@ import (
 	"github.com/iniznet/nightpost/internal/store"
 )
 
-// jobPayload is the additive job/command telemetry wire contract (#158).
+// jobPayload is the additive job/command telemetry wire contract .
 // Name is the queue job class or the artisan command signature; nothing
 // that can carry user data crosses this boundary.
 type jobPayload struct {
@@ -19,7 +19,7 @@ type jobPayload struct {
 	Seconds float64 `json:"seconds"`
 	OK      *bool   `json:"ok"`
 	Count   int64   `json:"count"`
-	// Trace is the per-run trace id of the last profiled leg (#203); it is
+	// Trace is the per-run trace id of the last profiled leg ; it is
 	// random hex minted by the producer, never user-derived, so it carries
 	// no reader data across this boundary.
 	Trace   string  `json:"trace"`
@@ -28,7 +28,7 @@ type jobPayload struct {
 const maxJobName = 191
 
 // JobHandler records one job/command completion per POST. New route; the
-// compat-locked ingest surface keeps its shape (#145).
+// compat-locked ingest surface keeps its shape .
 func JobHandler(st *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		project := r.PathValue("project")

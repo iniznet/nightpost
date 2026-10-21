@@ -7,10 +7,10 @@ import (
 	"time"
 )
 
-// M6.3: operator-tunable settings live in the DATABASE, not in process flags.
+// operator-tunable settings live in the DATABASE, not in process flags.
 // The flags survive as IMPORT-ONCE defaults — SeedSettings writes a default
 // only when the key is absent, so a value an operator changed in the UI
-// survives every restart and redeploy. That is the same shape M6.3 prescribes
+// survives every restart and redeploy. That is the same shape prescribes
 // for -alerts-config, and it is why the seed must never overwrite.
 
 const (

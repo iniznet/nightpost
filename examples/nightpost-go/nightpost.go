@@ -10,7 +10,7 @@
 //  1. OFF BY DEFAULT. New returns nil when nothing is configured, and every
 //     method is a no-op on a nil receiver, so a caller never branches on
 //     "is telemetry enabled?" — and an installer cannot silently switch a
-//     sender on (#145).
+//     sender on .
 //  2. NEVER COST THE REQUEST. Every send is bounded, and the failure of a
 //     telemetry call is never returned into application control flow.
 package main

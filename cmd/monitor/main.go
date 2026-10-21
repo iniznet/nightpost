@@ -33,11 +33,11 @@ func main() {
 	occurrenceCap := flag.Int("occurrence-cap", 30, "max occurrence rows stored per issue fingerprint per minute (0 = unlimited)")
 	ingestRate := flag.Float64("ingest-rate", 50, "ingest events per second allowed per project before 429")
 	ingestBurst := flag.Float64("ingest-burst", 100, "ingest burst ceiling per project")
-	ingressGlobalRate := flag.Float64("ingress-global-rate", 500, "M6.10 coarse ingest ceiling across ALL projects, events/s")
-	ingressGlobalBurst := flag.Float64("ingress-global-burst", 1000, "M6.10 coarse ingest burst across all projects")
-	ingressIPRate := flag.Float64("ingress-ip-rate", 100, "M6.10 coarse ingest ceiling per source address, events/s (0 disables — the right setting behind a reverse proxy, where every request shares the proxy address)")
-	ingressIPBurst := flag.Float64("ingress-ip-burst", 200, "M6.10 coarse per-source-address burst")
-	requireRegistered := flag.Bool("require-registered", true, "refuse an ingest POST that names a project nobody registered (401) instead of auto-provisioning it; default ON in this product build (M6.10) - pass -require-registered=false to restore the legacy auto-provision posture")
+	ingressGlobalRate := flag.Float64("ingress-global-rate", 500, "coarse ingest ceiling across ALL projects, events/s")
+	ingressGlobalBurst := flag.Float64("ingress-global-burst", 1000, "coarse ingest burst across all projects")
+	ingressIPRate := flag.Float64("ingress-ip-rate", 100, "coarse ingest ceiling per source address, events/s (0 disables — the right setting behind a reverse proxy, where every request shares the proxy address)")
+	ingressIPBurst := flag.Float64("ingress-ip-burst", 200, "coarse per-source-address burst")
+	requireRegistered := flag.Bool("require-registered", true, "refuse an ingest POST that names a project nobody registered (401) instead of auto-provisioning it; default ON in this product build - pass -require-registered=false to restore the legacy auto-provision posture")
 	maxAutoProjects := flag.Int("max-auto-projects", 500, "max projects auto-provisioned from unsigned ingest before a NEW name is refused (0 = unbounded)")
 	requireIngestKeys := flag.Bool("require-ingest-keys", false, "refuse unsigned ingest entirely — set this once ingest is reachable through a public ingress")
 	sessionSecret := flag.String("session-secret", "", "HMAC key for dashboard session cookies (empty = random per boot; sessions die on restart)")
@@ -54,7 +54,7 @@ func main() {
 	}
 	defer st.Close()
 	st.MaxOccPerMin.Store(int64(*occurrenceCap))
-	// M6.3: the process flags are IMPORT-ONCE defaults. SeedSettings only
+	// the process flags are IMPORT-ONCE defaults. SeedSettings only
 	// writes ABSENT keys, so a value an operator changed at /settings survives
 	// every restart and redeploy.
 	if err := st.SeedSettings(store.SettingDefaults{
@@ -96,7 +96,7 @@ func main() {
 		_ = os.Chmod(out, 0o600)
 		// The password is deliberately NOT logged: the container's stdout lands
 		// in the json-file log and would keep the credential for the log's
-		// whole rotation window (M6.5).
+		// whole rotation window.
 		log.Printf("admin %q password reset — written to %s (mode 0600). Read it there and delete the file; it is not printed anywhere. Restart without -reset-admin when done.", email, out)
 		return
 	}
@@ -126,7 +126,7 @@ func main() {
 	go retentionLoop(st, *retentionDays, *pruneInterval)
 
 	mux := http.NewServeMux()
-	// M6.10 route order: coarse guard → key gate → per-project shaper →
+	// route order: coarse guard → key gate → per-project shaper →
 	// handler. The guard is OUTERMOST because a {project}-name flood must be
 	// throttled before any key lookup or DB work, and its ceiling is keyed on
 	// nothing the caller picks. The shaper is INNERMOST because its bucket is
@@ -153,16 +153,16 @@ func main() {
 	// Browser preflight for the first-party reporter endpoints.
 	mux.HandleFunc("OPTIONS /ingest/{project}/error", ingest.PreflightSource(cors.OriginFor))
 	mux.HandleFunc("OPTIONS /ingest/{project}/profile", ingest.PreflightSource(cors.OriginFor))
-	// Health contract (M6.5). /up is LIVENESS — the process answers, and it
+	// Health contract. /up is LIVENESS — the process answers, and it
 	// deliberately never touches the database, so a sick store cannot get the
 	// container killed and restarted into the same sickness. /ready is
 	// READINESS: the store must answer a real query. Both are unauthenticated,
 	// so both stay minimal — status, db and the build revision, never a tenant
 	// count or anything else an unauthenticated caller should not learn.
 	mux.HandleFunc("GET /up", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
-	// M6.10 exposes the ingest-rejection counters on the machine-readable
+	// exposes the ingest-rejection counters on the machine-readable
 	// health leg as well as the footer strip. They ride /ready, not /up: /up
-	// must stay trivial (M6.5), because a liveness probe that does work can get
+	// must stay trivial, because a liveness probe that does work can get
 	// a container restarted into the same condition.
 	health := web.IngestHealth{
 		ShaperRejections:  sh.Rejections,
@@ -204,14 +204,14 @@ type mountPoint struct{ dir, fstype string }
 
 // logDBGuard prints the resolved DB path and the filesystem mount holding
 // it, warning loudly when the database would live in the container layer
-// and be wiped by the next deploy (#159).
+// and be wiped by the next deploy .
 // resolveSessionSecret returns the dashboard cookie key.
 //
 // Precedence: the -session-secret flag, then the file named by
 // -session-secret-file, then a fresh random key. With a file configured a
 // GENERATED key is persisted (0600) instead of being thrown away at exit: the
 // old random-per-boot default silently logged every admin out on each deploy,
-// which is precisely what a one-command install must not do (M6.5).
+// which is precisely what a one-command install must not do.
 func resolveSessionSecret(flagValue, filePath string) ([]byte, error) {
 	if flagValue != "" {
 		return []byte(flagValue), nil
@@ -295,7 +295,7 @@ func readyHandler(st *store.Store, h web.IngestHealth) http.HandlerFunc {
 
 // buildRevision reports the binary's VCS revision for the readiness payload,
 // so "which build is actually deployed?" is answerable from the endpoint
-// rather than by guessing at image tags (M6.5).
+// rather than by guessing at image tags.
 func buildRevision() string {
 	if bi, ok := debug.ReadBuildInfo(); ok {
 		for _, s := range bi.Settings {
@@ -367,7 +367,7 @@ func pruneMinutes(d time.Duration) int {
 // profile window. One cycle runs at boot, then on the interval; every cycle is
 // chunked deletes on the single-writer connection.
 //
-// M6.3: the loop RE-READS its knobs from the settings table each cycle, so an
+// the loop RE-READS its knobs from the settings table each cycle, so an
 // operator's change at /settings takes effect without a restart — the flags
 // passed here are only the import-once fallback for an unseeded key.
 func retentionLoop(st *store.Store, fallbackDays int, fallbackEvery time.Duration) {

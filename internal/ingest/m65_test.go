@@ -59,7 +59,7 @@ func TestPreflightSourceRefusesUnlistedOrigin(t *testing.T) {
 	}
 }
 
-// TestCORSResolverInheritsInstallDefault is the M6.5 contract: the row is the
+// TestCORSResolverInheritsInstallDefault is the contract: the row is the
 // per-tenant truth, the -cors-origin flag is only the install-time seed.
 func TestCORSResolverInheritsInstallDefault(t *testing.T) {
 	rows := map[string]string{"beta": "https://beta.example.com"}

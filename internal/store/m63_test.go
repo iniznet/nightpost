@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// TestSettingsSeedIsImportOnce is the M6.3 contract: the process flags seed a
+// TestSettingsSeedIsImportOnce is the contract: the process flags seed a
 // key ONCE, and a value an operator saved afterwards survives a re-seed (i.e.
 // a restart or redeploy with the old flags).
 func TestSettingsSeedIsImportOnce(t *testing.T) {
@@ -85,7 +85,7 @@ func TestValidateSettingRejectsBadInput(t *testing.T) {
 	}
 }
 
-// TestRetentionHonoursStoredSetting is the M6.3 effect proof at the store
+// TestRetentionHonoursStoredSetting is the effect proof at the store
 // level: the days value the retention loop reads back from settings is the
 // one that prunes. The loop itself is a three-line reader of exactly this.
 func TestRetentionHonoursStoredSetting(t *testing.T) {

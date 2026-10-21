@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// Cross-service trace context (M6.5).
+// Cross-service trace context.
 //
 // A producer with a Nightpost client carries its trace id in the payload. An
 // OpenTelemetry-instrumented service (Go, Python, Rust, …) has neither our SDK

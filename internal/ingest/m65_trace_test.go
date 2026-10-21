@@ -62,7 +62,7 @@ func TestTraceIDFromRequestPrecedence(t *testing.T) {
 	}
 }
 
-// TestProfileHandlerJoinsTraceFromTraceparent is the point of the M6.5 item: a
+// TestProfileHandlerJoinsTraceFromTraceparent is the point of the item: a
 // service with no Nightpost client joins the trace by header propagation alone.
 func TestProfileHandlerJoinsTraceFromTraceparent(t *testing.T) {
 	st := newBenchStore(t)

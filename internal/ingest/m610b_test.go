@@ -24,7 +24,7 @@ func postProject(t *testing.T, mux *http.ServeMux, project string) int {
 	return rec.Code
 }
 
-// TestKeyGateRequireRegisteredRefusesUnknownProject is the M6.10 P0: a POST
+// TestKeyGateRequireRegisteredRefusesUnknownProject is the P0: a POST
 // must not be able to MINT a project by naming it.
 func TestKeyGateRequireRegisteredRefusesUnknownProject(t *testing.T) {
 	st := newBenchStore(t)
@@ -82,7 +82,7 @@ func TestKeyGateUnknownProjectsStillAdmittedWithoutTheFlag(t *testing.T) {
 	}
 }
 
-// TestKnownSetIsBounded is the other M6.10 P0 half: the project name is chosen
+// TestKnownSetIsBounded is the other P0 half: the project name is chosen
 // by the caller, so the set that remembers "already decided" must not grow with
 // it. An evicted name costs one extra decision, never a wrong admission.
 func TestKnownSetIsBounded(t *testing.T) {

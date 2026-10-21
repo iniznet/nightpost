@@ -8,7 +8,7 @@ import (
 )
 
 // Email delivers alerts over SMTP with opportunistic STARTTLS; credentials
-// come from the config file (mounted secret), never from the UI (#157).
+// come from the config file (mounted secret), never from the UI .
 type Email struct {
 	Cfg Channel
 }

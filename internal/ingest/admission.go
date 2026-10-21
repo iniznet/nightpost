@@ -9,7 +9,7 @@ import (
 )
 
 // Shaper bounds ingest per project with a token bucket: senders are
-// first-party and sampled by contract (#145), so a misbehaving sender must
+// first-party and sampled by contract , so a misbehaving sender must
 // never translate into unbounded store writes. Requests past the budget get
 // a cheap 429 before any body read or DB work.
 type Shaper struct {
@@ -23,7 +23,7 @@ type Shaper struct {
 	buckets map[string]*tokenBucket
 }
 
-// maxShaperBuckets bounds the per-project bucket map (M6.10). The map is keyed
+// maxShaperBuckets bounds the per-project bucket map. The map is keyed
 // on a name the caller chooses, so without a cap a distinct-name flood grows
 // it without limit even while every request is being throttled.
 const maxShaperBuckets = 4096
@@ -97,7 +97,7 @@ func (sh *Shaper) evictBucketsLocked() {
 	}
 }
 
-// BucketCount reports the live bucket-map size; the M6.10 test asserts the bound.
+// BucketCount reports the live bucket-map size; the test asserts the bound.
 func (sh *Shaper) BucketCount() int {
 	sh.mu.Lock()
 	defer sh.mu.Unlock()

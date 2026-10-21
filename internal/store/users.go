@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-// Single-admin dashboard accounts (#157): one tier, PBKDF2 hashes, no roles.
+// Single-admin dashboard accounts : one tier, PBKDF2 hashes, no roles.
 // The users table is configuration — retention never prunes it.
 
 const pbkdf2Iter = 150_000
@@ -104,7 +104,7 @@ func (s *Store) CreateUserIfNone(email, pwHash string) (bool, error) {
 		return false, err
 	}
 	if n > 0 {
-		// M6.2: a new dashboard account owns the default org from the start.
+		// a new dashboard account owns the default org from the start.
 		if _, merr := s.wdb.Exec(`INSERT OR IGNORE INTO org_members (org_id, user_id, role, created_at)
 			SELECT ?, id, ?, CAST(strftime('%s','now') AS INTEGER) FROM users WHERE email = ?`,
 			DefaultOrgID, RoleOwner, email); merr != nil {
@@ -130,7 +130,7 @@ func (s *Store) VerifyUser(email, password string) (bool, error) {
 }
 
 // ResetAdminPassword upserts a fresh random password for email (creating
-// the account when absent) and returns it once — backs -reset-admin (#157).
+// the account when absent) and returns it once — backs -reset-admin .
 func (s *Store) ResetAdminPassword(email string) (string, error) {
 	pw, err := randomPassword(20)
 	if err != nil {
@@ -146,7 +146,7 @@ func (s *Store) ResetAdminPassword(email string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// M6.2: -reset-admin may create the account, so it must own the default
+	// -reset-admin may create the account, so it must own the default
 	// org too — otherwise the recovered login would see no projects at all.
 	if _, merr := s.wdb.Exec(`INSERT OR IGNORE INTO org_members (org_id, user_id, role, created_at)
 		SELECT ?, id, ?, CAST(strftime('%s','now') AS INTEGER) FROM users WHERE email = ?`,

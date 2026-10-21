@@ -7,10 +7,10 @@ import (
 	"time"
 )
 
-// M6.2 multi-tenancy. The hierarchy is ADDITIVE: projects gain an `org_id`
+// multi-tenancy. The hierarchy is ADDITIVE: projects gain an `org_id`
 // while ingest keys stay project-grain (program convention 3), so no live
-// ingest surface is re-keyed to fix tenancy. Roles are the whole M6.2
-// authorization vocabulary; M6.3's Settings UI is where they get edited.
+// ingest surface is re-keyed to fix tenancy. Roles are the whole
+// authorization vocabulary; the Settings UI is where they get edited.
 
 const (
 	RoleOwner  = "owner"
@@ -18,7 +18,7 @@ const (
 	RoleViewer = "viewer"
 )
 
-// DefaultOrgID is the org every pre-M6.2 project and dashboard account is
+// DefaultOrgID is the org every pre-project and dashboard account is
 // absorbed into, so an upgraded volume is never orphaned.
 const DefaultOrgID = 1
 
@@ -33,7 +33,7 @@ type Org struct {
 	Members   int64
 }
 
-// ValidOrgRole reports whether role is in the M6.2 vocabulary.
+// ValidOrgRole reports whether role is in the vocabulary.
 func ValidOrgRole(role string) bool {
 	return role == RoleOwner || role == RoleAdmin || role == RoleViewer
 }

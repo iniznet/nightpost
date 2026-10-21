@@ -138,7 +138,7 @@ a running producer: a project that already exists without a key stays admitted
 Prefer `-require-registered` first if you must stage the change — it is the
 narrower refusal, and the bounded auto-provision budget exists to make a flood
 pointless rather than to make unsigned ingest safe. This product build flips
-`-require-registered`'s default to on (M6.7); pass `-require-registered=false`
+`-require-registered`'s default to on; pass `-require-registered=false`
 to restore the legacy auto-provision posture for an existing install.
 
 Then tune the ceilings for the real traffic shape:

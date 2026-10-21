@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// M6.10 — ingest hardening for public ingress.
+// — ingest hardening for public ingress.
 //
 // The per-project token bucket is keyed on a path segment the CALLER chooses.
 // An unauthenticated flood that varies {project} mints a fresh full-burst

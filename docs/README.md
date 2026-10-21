@@ -41,7 +41,7 @@ pages show real aggregates rather than empty states.
 | Jobs — queue/command runs and heartbeats | ![Jobs](screenshots/08-jobs.png) |
 | Keys — per-project ingest keys, rotation and CORS origin | ![Keys](screenshots/09-keys.png) |
 | Settings — retention, prune interval, per-project profile budget, per-project CORS origin | ![Settings](screenshots/10-settings.png) |
-| Orgs — org/project grouping (M6.2) | ![Orgs](screenshots/11-orgs.png) |
+| Orgs — org/project grouping | ![Orgs](screenshots/11-orgs.png) |
 
 A **quickstart GIF** is still absent, and deliberately: the UI is server-rendered
 with zero JavaScript, so there is no state transition worth animating — a slide

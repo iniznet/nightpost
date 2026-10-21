@@ -44,7 +44,7 @@ func (s *Store) HourBuckets(project string, hours int, typ string) ([]int64, err
 	}
 	now := time.Now().Unix()
 	cutoff := now - int64(hours)*3600
-	// Drive from ISSUES, not from occurrences (M6.4, measured). Written the other
+	// Drive from ISSUES, not from occurrences (measured). Written the other
 	// way the planner scanned occurrences by seen_at and looked up the clustered
 	// row per match to reach project/type: 213ms over a realistic 200k-occurrence
 	// day, the slowest dashboard query by an order of magnitude. Filtering the

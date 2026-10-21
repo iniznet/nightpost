@@ -8,7 +8,7 @@ import (
 )
 
 // Config is the -alerts-config JSON document, hot-reloaded on mtime change.
-// No alert-configuration UI in M4: the file is the product surface (#157).
+// No alert-configuration UI in M4: the file is the product surface .
 type Config struct {
 	BaseURL  string    `json:"base_url"`
 	TickSecs int       `json:"tick_seconds"`

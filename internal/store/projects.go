@@ -21,14 +21,14 @@ func HashIngestKey(secret string) string {
 
 // Project carries the ingest-key state for one producer project. Projects
 // are configuration, not events: the retention loop must never prune this
-// table (#157).
+// table .
 type Project struct {
 	Key       string
 	IngestKey string
 	CreatedAt time.Time
 	RotatedAt time.Time
 	// CORSOrigin is the project's browser-origin allowlist (comma-separated).
-	// Empty means "fall back to the install's -cors-origin default" (M6.5).
+	// Empty means "fall back to the install's -cors-origin default".
 	CORSOrigin string
 }
 
@@ -119,7 +119,7 @@ func (s *Store) RevokeIngestKey(key string) error {
 	return nil
 }
 
-// ProjectExists reports whether a project row exists. The M6.10
+// ProjectExists reports whether a project row exists. The
 // registration-required mode asks before it would auto-provision a name, so a
 // caller-chosen project cannot be created by an ingest POST.
 func (s *Store) ProjectExists(key string) (bool, error) {
@@ -153,7 +153,7 @@ func (s *Store) SetProjectCORSOrigin(key, origin string) error {
 }
 
 // UnsignedProjectCount reports projects still accepting legacy ingest;
-// boot uses it for the deprecation warning (#157).
+// boot uses it for the deprecation warning .
 func (s *Store) UnsignedProjectCount() (int, error) {
 	var n int
 	err := s.rdb.QueryRow(`SELECT COUNT(*) FROM projects WHERE ingest_key = ''`).Scan(&n)

@@ -16,7 +16,7 @@ func ageIssue(t *testing.T, st *Store, id int64, days int) {
 	}
 }
 
-// TestArchiveStaleIssuesHidesAndRestores is the M6.4 archive contract: an
+// TestArchiveStaleIssuesHidesAndRestores is the archive contract: an
 // archived issue leaves the live view, and a RECURRENCE brings it back. A
 // one-way archive would hide a returning defect forever, which is worse than
 // leaving the table unbounded.

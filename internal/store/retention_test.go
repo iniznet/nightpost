@@ -42,7 +42,7 @@ func TestPruneOccurrencesBefore(t *testing.T) {
 	}
 }
 
-// TestPruneIssueOccurrencesSpansRanges covers the M6.4 rewrite: the cap must
+// TestPruneIssueOccurrencesSpansRanges covers the rewrite: the cap must
 // hold per issue ACROSS range boundaries, not merely inside the first chunk.
 func TestPruneIssueOccurrencesSpansRanges(t *testing.T) {
 	st := newTestStore(t)

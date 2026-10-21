@@ -9,7 +9,7 @@ import (
 	"github.com/iniznet/nightpost/internal/store"
 )
 
-// releasePayload is the additive deploy-marker wire contract (#158).
+// releasePayload is the additive deploy-marker wire contract .
 type releasePayload struct {
 	Version     string `json:"version"`
 	Environment string `json:"environment"`

@@ -15,7 +15,7 @@ func cookieNamed(cookies []*http.Cookie, name string) *http.Cookie {
 	return nil
 }
 
-// TestSessionCookieSecure covers the M6.5 gap: the session cookie was HttpOnly
+// TestSessionCookieSecure covers the gap: the session cookie was HttpOnly
 // and SameSite but never Secure, so behind a TLS-terminating proxy it could
 // still travel over plain HTTP.
 func TestSessionCookieSecure(t *testing.T) {

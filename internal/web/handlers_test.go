@@ -84,7 +84,7 @@ func TestRoutesRenderWithData(t *testing.T) {
 	if !strings.Contains(body, "user 42 not found") {
 		t.Errorf("issues list missing seeded issue; body: %.400s", body)
 	}
-	// M6.1: the log stream owns its own tab, so a log-type pseudo-issue folds
+	// the log stream owns its own tab, so a log-type pseudo-issue folds
 	// out of the default error stream (see TestLogPseudoIssuesFoldOutOfIssueStream).
 	if strings.Contains(body, "login failed") {
 		t.Errorf("issues list should fold out log-type rows; body: %.400s", body)

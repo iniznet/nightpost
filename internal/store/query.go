@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// Query telemetry (#157): slow queries aggregate per normalized SQL shape
+// Query telemetry : slow queries aggregate per normalized SQL shape
 // so parameterized variants share one row. Each event also upserts a
 // type='query' issue, keeping the defect list the single history surface.
 
@@ -28,7 +28,7 @@ type QueryAgg struct {
 // no PREG byte-offset mixing here: ReplaceAllString is character-safe.)
 var sqlNumRe = regexp.MustCompile(`\b\d+\b`)
 
-// normalizeSQL is the single grouping authority for query telemetry (#157):
+// normalizeSQL is the single grouping authority for query telemetry :
 // the backend ships placeholder SQL verbatim, every other producer's raw
 // SQL lands shaped the same way.
 func normalizeSQL(s string) string {

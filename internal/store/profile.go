@@ -36,7 +36,7 @@ type Span struct {
 	Tags       map[string]any `json:"tags,omitempty"`
 }
 
-// TreeNode is one node of a pruned call tree (#181): the execution stack
+// TreeNode is one node of a pruned call tree : the execution stack
 // with an inclusive wall-clock duration per step. Keys are deliberately
 // short because the JSON ships on the ingest wire from the SvelteKit front.
 type TreeNode struct {
@@ -359,7 +359,7 @@ func (s *Store) ProfilesFiltered(projectKey, typ, nameLike string, limit int) ([
 
 // PruneProfiles keeps the profile table bounded PER PROJECT: every project
 // keeps its newest `keep` rows. A single global keep-window let one noisy
-// producer evict every other org's profiles and traces — the M6.2 acceptance
+// producer evict every other org's profiles and traces — the acceptance
 // add — so the partition is by project_key, never by table.
 //
 // The delete is chunked and ranked by a window function, so each statement

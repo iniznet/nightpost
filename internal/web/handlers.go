@@ -20,7 +20,7 @@ import (
 //go:embed templates/*.html
 var templateFS embed.FS
 
-// Page identifies the rendered page. The M6.1 IA consolidates pages into two
+// Page identifies the rendered page. The IA consolidates pages into two
 // sections (Errors, Performance); a page still names itself so the nav can
 // highlight the section and the tab row can mark the active tab.
 type Page string
@@ -462,7 +462,7 @@ var settingMeta = []struct {
 	{store.SettingIngestBurst, "Ingest burst ceiling (per project)", "Token-bucket burst ceiling.", false},
 }
 
-// handleSettings is the M6.3 settings surface: every operator-tunable value
+// handleSettings is the settings surface: every operator-tunable value
 // lives here instead of in a process flag.
 func (s *server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	s.renderSettings(w, r, nil)
@@ -586,7 +586,7 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *A
 	page.HandleFunc("GET /{$}", s.handleDashboard)
 
 	// Errors section: one nav item, Issues and Logs cross-linked. The legacy
-	// paths keep serving the same handlers (Expand/Contract, M6.1 invariant).
+	// paths keep serving the same handlers (Expand/Contract, invariant).
 	page.HandleFunc("GET /errors", s.handleErrors)
 	page.HandleFunc("GET /issues", s.handleIssues)
 	page.HandleFunc("GET /issues/{id}", s.handleIssueDetail)
@@ -732,7 +732,7 @@ func parseID(s string) int64 {
 }
 
 // handleErrors is the Errors-section dispatcher: Issues is the default tab and
-// an unknown tab resolves to it, never a 404 (M6.1 invariant I2).
+// an unknown tab resolves to it, never a 404 (invariant I2).
 func (s *server) handleErrors(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("tab") == "logs" {
 		s.handleLogs(w, r)
@@ -741,7 +741,7 @@ func (s *server) handleErrors(w http.ResponseWriter, r *http.Request) {
 	s.handleIssues(w, r)
 }
 
-// handleIssues renders the error stream. M6.1 folds the log-type
+// handleIssues renders the error stream. folds the log-type
 // pseudo-issues out of the default stream (they live on the Logs tab); an
 // explicit `?type=` request restores them.
 func (s *server) handleIssues(w http.ResponseWriter, r *http.Request) {
@@ -1167,7 +1167,7 @@ func (s *server) handleJobs(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleOrgs is the M6.2 tenancy surface: create an org and move projects
+// handleOrgs is the tenancy surface: create an org and move projects
 // under it. Assignment is additive — the project key and its ingest key are
 // never touched, so no producer is reconfigured to become tenanted.
 func (s *server) handleOrgs(w http.ResponseWriter, r *http.Request) {
@@ -1426,7 +1426,7 @@ func (s *server) handleKeyRevoke(w http.ResponseWriter, r *http.Request) {
 	s.renderKeys(w, r, map[string]any{"Revoked": project})
 }
 
-// handleKeyOrigin saves a project's browser-origin allowlist (M6.5). The
+// handleKeyOrigin saves a project's browser-origin allowlist. The
 // allowlist was one global -cors-origin string applied to every browser route,
 // which a multi-tenant install cannot express: each tenant's front end is a
 // different origin. Empty clears it back to the install default.

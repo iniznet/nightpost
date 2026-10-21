@@ -9,7 +9,7 @@ import (
 	"github.com/iniznet/nightpost/internal/store"
 )
 
-// Call-tree caps (#181): a production PHP request explodes into thousands of
+// Call-tree caps : a production PHP request explodes into thousands of
 // nodes, so the stored tree is pruned to what a human can scan: subtrees
 // under max(1% of total, 2 ms) fold into their parent, wide siblings
 // collapse into an "(other xN)" node, depth is capped, and the marshaled

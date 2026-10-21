@@ -9,7 +9,7 @@ import (
 	"github.com/iniznet/nightpost/internal/store"
 )
 
-// queryPayload is the additive slow-query wire contract (#157). Producers
+// queryPayload is the additive slow-query wire contract . Producers
 // send only what DB::listen yields with bindings already redacted.
 type queryPayload struct {
 	SQL         string  `json:"sql"`
@@ -21,7 +21,7 @@ type queryPayload struct {
 const maxQuerySQL = 8192
 
 // QueryHandler records one slow-query event per POST. It is a NEW route:
-// the compat-locked ingest surface keeps its shape (#145).
+// the compat-locked ingest surface keeps its shape .
 func QueryHandler(st *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		project := r.PathValue("project")

@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// Alert support queries (#157): the alerts_log is the cooldown/cap ledger;
+// Alert support queries : the alerts_log is the cooldown/cap ledger;
 // the evaluation queries are read-only aggregates except Regressions,
 // which reopens matched issues in the same statement window.
 

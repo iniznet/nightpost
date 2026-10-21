@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// TestToolbarOrgScope pins the org leg of the single param dialect (M6.2).
+// TestToolbarOrgScope pins the org leg of the single param dialect.
 func TestToolbarOrgScope(t *testing.T) {
 	q, err := url.ParseQuery("org=acme&project=backend&range=7d")
 	if err != nil {

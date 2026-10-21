@@ -9,7 +9,7 @@ import (
 	"github.com/iniznet/nightpost/internal/store"
 )
 
-// TestSettingsPageRendersAndSaves is the M6.3 done-when in miniature: a
+// TestSettingsPageRendersAndSaves is the done-when in miniature: a
 // setting changed through the page is the value the store now reports.
 func TestSettingsPageRendersAndSaves(t *testing.T) {
 	srv, st := newTestServer(t)

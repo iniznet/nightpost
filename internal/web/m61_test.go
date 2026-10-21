@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// everyRoute is the M6.1 page surface with ZERO query params. It is the I1
+// everyRoute is the page surface with ZERO query params. It is the I1
 // guard: a page that needs a param to render is a broken page.
 var everyRoute = []string{
 	"/",
@@ -66,7 +66,7 @@ func TestUnknownTabNeverFails(t *testing.T) {
 }
 
 // TestLegacyRoutesServeConsolidatedContent is the I5 guard: Expand/Contract —
-// the pre-M6.1 paths keep answering with the same content as their
+// the pre-paths keep answering with the same content as their
 // consolidated section paths.
 func TestLegacyRoutesServeConsolidatedContent(t *testing.T) {
 	srv, st := newTestServer(t)
@@ -95,7 +95,7 @@ func TestLegacyRoutesServeConsolidatedContent(t *testing.T) {
 	}
 }
 
-// TestLogPseudoIssuesFoldOutOfIssueStream pins the M6.1 Errors-section
+// TestLogPseudoIssuesFoldOutOfIssueStream pins the Errors-section
 // contract: the default issue stream carries error-class rows only, and the
 // log row is reachable on the Logs tab.
 func TestLogPseudoIssuesFoldOutOfIssueStream(t *testing.T) {

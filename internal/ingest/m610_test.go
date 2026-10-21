@@ -9,7 +9,7 @@ import (
 	"github.com/iniznet/nightpost/internal/store"
 )
 
-// TestGuardThrottlesDistinctNameFlood is the M6.10 P0 guard: the per-project
+// TestGuardThrottlesDistinctNameFlood is the P0 guard: the per-project
 // bucket is keyed on a caller-chosen name, so a flood that varies {project}
 // must still meet an attacker-independent ceiling.
 func TestGuardThrottlesDistinctNameFlood(t *testing.T) {

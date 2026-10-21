@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// Job/command telemetry (#158): one aggregate row per (project, kind, name),
+// Job/command telemetry : one aggregate row per (project, kind, name),
 // upserted on every ingest event. No per-run rows exist, so table size is
 // bounded by the number of job/command NAMES the fleet can produce — a
 // bounded set — not by run volume. Failing jobs are retried by the queue

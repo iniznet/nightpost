@@ -1,7 +1,7 @@
 # DESIGN.md
 
-> Written for the M3 UI overhaul (iniznet/fenrirealm-tracker#148); extended by
-> the M6.1 IA consolidation (iniznet/fenrirealm-tracker#205). The world:
+> Written for the M3 UI overhaul (); extended by
+> the IA consolidation (). The world:
 > **precision ops** — a dense, calm, dark instrument panel; GitHub-dark
 > adjacent but tokenized and self-consistent. Server-rendered, zero runtime
 > JavaScript (except meta-refresh on the log stream), SVG drawn server-side.

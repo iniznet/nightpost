@@ -1,5 +1,5 @@
 # nightpost — the sink every platform sender points at
-# (iniznet/fenrirealm-tracker#145). Replaces the retired third-party server:
+# (). Replaces the retired third-party server:
 # one static Go binary, real SQLite volume (state SURVIVES restarts — the old
 # sink was deliberately in-memory), UI bound to HOST LOOPBACK only.
 #
@@ -22,17 +22,17 @@
 # named volume is the retention policy. Inside the app the retention loop
 # prunes occurrences older than the stored retention window (30 days by
 # default), caps each issue's occurrence history at 50 and keeps EACH
-# project's newest N profiles (M6.2 — a single global window let one noisy
+# project's newest N profiles (— a single global window let one noisy
 # producer evict every other org's history).
 #
-# M6.3: the retention/prune/occurrence-cap/profile-window knobs live in the
+# the retention/prune/occurrence-cap/profile-window knobs live in the
 # settings table and are edited at /settings. Any flags below are IMPORT-ONCE
 # defaults — a value saved in the UI wins from then on.
 #
 # M4 (#157): the dashboard requires login (first visit = /setup). Set
 # -session-secret, or point -session-secret-file at a mounted path and the key
 # is generated once and PERSISTED there (0600) — an unset key is random per
-# boot, so every deploy would silently log the admins out (M6.5).
+# boot, so every deploy would silently log the admins out.
 # Optionally -alerts-config /path/alerts.json (mounted secret file; channels +
 # rules).
 # Lost admin: one-off `docker exec ... monitor -reset-admin <email>` writes a
@@ -42,10 +42,10 @@
 # back to unsigned legacy); unsigned legacy ingest still works until a key is
 # issued.
 #
-# M6.5: per-project CORS — the browser allowlist moved onto the project row
+# per-project CORS — the browser allowlist moved onto the project row
 # (edit it at /keys); -cors-origin only seeds a project whose row is empty.
 #
-# M6.10: today's ingest posture is safe only because nothing publishes a host
+# today's ingest posture is safe only because nothing publishes a host
 # port. The moment ingest sits behind a public ingress, set
 # -require-ingest-keys (unsigned ingest then answers 401) and tune the coarse
 # ceilings: -ingress-global-rate/-ingress-global-burst cover a distinct

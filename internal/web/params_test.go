@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// TestParseToolbarDialect is the M6.1 "ONE shared param parser" guard: every
+// TestParseToolbarDialect is the "ONE shared param parser" guard: every
 // page's project/range/env read resolves through these cases, so a new page
 // cannot invent its own dialect (or its own default) without failing here.
 func TestParseToolbarDialect(t *testing.T) {

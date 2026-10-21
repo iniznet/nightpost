@@ -2,7 +2,7 @@ package store
 
 import "testing"
 
-// TestPruneProfilesKeepsPerProjectWindow is the M6.2 acceptance guard: the
+// TestPruneProfilesKeepsPerProjectWindow is the acceptance guard: the
 // profile keep-window is PER PROJECT, so a noisy sibling can no longer evict
 // another org's profiles and traces (a single global window of 5 would have
 // left "quiet" with zero rows).
@@ -39,7 +39,7 @@ func TestPruneProfilesKeepsPerProjectWindow(t *testing.T) {
 }
 
 // TestDefaultOrgAbsorbsProjectsAndAccounts covers the additive hierarchy: a
-// pre-M6.2 volume lands in the default org, and the M4 single admin becomes
+// pre-volume lands in the default org, and the M4 single admin becomes
 // that org's owner.
 func TestDefaultOrgAbsorbsProjectsAndAccounts(t *testing.T) {
 	st := newTestStore(t)

@@ -44,7 +44,7 @@ type KeyGate struct {
 	entries map[string]keyEntry
 	seen    *knownSet
 
-	// maxAuto bounds first-sight unsigned admission (M6.10); 0 keeps the
+	// maxAuto bounds first-sight unsigned admission; 0 keeps the
 	// legacy unbounded behaviour. requireKeys refuses unsigned ingest wholly —
 	// the endgame posture once ingest sits behind a public ingress.
 	maxAuto     int
@@ -93,7 +93,7 @@ func (g *KeyGate) RequireRegistered(v bool) { g.requireRegistered = v }
 //
 // It exists so the first-sight path runs once per project per process rather
 // than once per request — but the name is caller-chosen, so it must not grow
-// without limit (M6.10). Eviction is oldest-first and harmless: a name evicted
+// without limit. Eviction is oldest-first and harmless: a name evicted
 // early costs one extra decision, never a wrong admission.
 type knownSet struct {
 	mu    sync.Mutex
@@ -161,7 +161,7 @@ func (g *KeyGate) Refusals() int64 { return g.refused.Load() }
 func (g *KeyGate) Rejections() int64 { return g.rejected.Load() }
 
 // UnknownAdmits reports auto-provisioned unsigned projects. A rising figure on a
-// public ingress is the M6.10 attack signature.
+// public ingress is the attack signature.
 //
 // It is a SIGNATURE, not an exact tally of distinct names: only the goroutine
 // that inserted a name counts it (so a concurrent first sight is counted once),
@@ -288,7 +288,7 @@ func WithKeyGate(g *KeyGate, resolveProject func(*http.Request) string, next htt
 			return
 		}
 		// First sight of an unsigned project: the name was chosen by the
-		// caller, so admission is BOUNDED rather than automatic (M6.10).
+		// caller, so admission is BOUNDED rather than automatic.
 		if !g.seen.has(project) {
 			if g.requireKeys {
 				g.refused.Add(1)

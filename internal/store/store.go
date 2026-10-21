@@ -24,7 +24,7 @@ type Store struct {
 	limWindows map[string]*limWindow
 	// MaxOccPerMin is the live per-fingerprint occurrence cap. It is atomic
 	// because the retention loop re-reads it from settings while ingest reads
-	// it on every event (M6.3).
+	// it on every event.
 	MaxOccPerMin atomic.Int64
 
 	dropped atomic.Int64
@@ -152,7 +152,7 @@ CREATE INDEX IF NOT EXISTS idx_occurrences_issue ON occurrences(issue_id, seen_a
 	}
 	s := &Store{wdb: wdb, rdb: rdb, limWindows: map[string]*limWindow{}}
 	s.MaxOccPerMin.Store(30)
-	// M6.2: the default org and its memberships are seeded BEFORE projects are
+	// the default org and its memberships are seeded BEFORE projects are
 	// auto-provisioned, so a producer admitted on first sight already has an
 	// org to land in and an upgraded volume is never orphaned.
 	if err := s.EnsureDefaultOrg(); err != nil {
@@ -164,7 +164,7 @@ CREATE INDEX IF NOT EXISTS idx_occurrences_issue ON occurrences(issue_id, seen_a
 		return nil, fmt.Errorf("seed org memberships: %w", err)
 	}
 	// Auto-provision the projects table from existing event rows so upgraded
-	// volumes carry their producers as unsigned legacy projects (#157).
+	// volumes carry their producers as unsigned legacy projects .
 	if err := s.ProvisionProjects(); err != nil {
 		s.Close()
 		return nil, fmt.Errorf("provision projects: %w", err)
@@ -179,7 +179,7 @@ func migrate(db *sql.DB) error {
 	for _, m := range []struct{ name, stmt string }{
 		{"issues.channel", `ALTER TABLE issues ADD COLUMN channel TEXT NOT NULL DEFAULT ''`},
 		{"idx_issues_type", `CREATE INDEX IF NOT EXISTS idx_issues_type ON issues(type, last_seen_at DESC)`},
-		// M6.4 measured a covering composite here (seen_at, issue_id) as a NET LOSS:
+		// measured a covering composite here (seen_at, issue_id) as a NET LOSS:
 		// HourBuckets 213ms -> 87ms, but ingest throughput fell 9,533 -> 6,561
 		// events/s and the two issue-list queries doubled (4.6 -> 9.4ms, 23.6 ->
 		// 43.3ms). One more index on the hottest table costs more than one query
@@ -200,7 +200,7 @@ func migrate(db *sql.DB) error {
 	created_at INTEGER NOT NULL DEFAULT 0,
 	sessions_valid_after INTEGER NOT NULL DEFAULT 0)`},
 		{"issues.resolved_at", `ALTER TABLE issues ADD COLUMN resolved_at INTEGER NOT NULL DEFAULT 0`},
-		// M6.4: the issues table IS the defect list and is never pruned, while every
+		// the issues table IS the defect list and is never pruned, while every
 		// distinct log message adds a row (measured: 20,000 rows for one chatty app
 		// on one day of real volume). Archiving is what bounds it — see
 		// ArchiveStaleIssues. The archive guard on the read side is spelled at each
@@ -285,7 +285,7 @@ func migrate(db *sql.DB) error {
 
 // Ping reports whether the read pool answers. The readiness probe needs a
 // real query rather than a cached handle, because a store whose file vanished
-// still hands out connections (M6.5).
+// still hands out connections.
 func (s *Store) Ping() error {
 	var one int
 	return s.rdb.QueryRow(`SELECT 1`).Scan(&one)
@@ -377,7 +377,7 @@ func (s *Store) insertOccurrence(issueID int64, kind string, payload any, now in
 
 // The archive guard `archived_at = 0` sits on the dashboard's issue READS: the
 // issue list, the open/total counts, the log level counts, "new since release"
-// and the per-project overview counts (M6.4). Retention already deleted an
+// and the per-project overview counts. Retention already deleted an
 // archived issue's occurrences, so it contributes to no chart, and leaving it in
 // the counts while the list omitted it would be worse than either choice.
 //

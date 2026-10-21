@@ -51,7 +51,7 @@ func (s *Store) PruneIssueOccurrences(keep int) (int64, error) {
 // The previous form read EVERY issue id into memory and issued one DELETE per
 // issue: O(issues) statements per tick against a single WAL writer, with an
 // unbounded id slice to match. That is exactly the wedge class the retention
-// loop must never enter (M6.4 — the max_statement_time / 70100 pattern the
+// loop must never enter (— the max_statement_time / 70100 pattern the
 // backend rails against). Ranging keeps both bounded: the statement count is
 // issues/chunk, and each statement's row set is one chunk of issues.
 //

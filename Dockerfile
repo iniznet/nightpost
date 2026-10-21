@@ -1,4 +1,4 @@
-# nightpost — first-party observability ingest (iniznet/fenrirealm-tracker#141 #145)
+# nightpost — first-party observability ingest ( #145)
 
 # Build stage: static binary, CGO off (modernc.org/sqlite is pure Go — the
 # image needs no gcc/libc headers). Toolchain pinned to go.mod's requirement
@@ -34,6 +34,6 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 ENTRYPOINT ["/usr/local/bin/monitor"]
 # --session-secret-file keeps the session key INSIDE the volume. Without it
 # the key is random per boot, so every deploy silently logs the admins out
-# (M6.5) — the shipped default must not do that.
+# — the shipped default must not do that.
 CMD ["--http", ":8000", "--socket", ":9913", "--db", "/data/monitor.db", \
      "--session-secret-file", "/data/session.key"]

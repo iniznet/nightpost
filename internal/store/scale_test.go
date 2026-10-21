@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// TestScaleLatency is the M6.4 measurement. The phase says "start only when
+// TestScaleLatency is the measurement. The phase says "start only when
 // dashboard slowness is measured — record the numbers first", so this IS the
 // precondition: a production-shaped dataset, every dashboard query timed, the
 // retention cycle timed, and the single-writer ingest ceiling timed.
@@ -21,7 +21,7 @@ import (
 // per row, which would make the harness slower than the thing it measures).
 func TestScaleLatency(t *testing.T) {
 	if os.Getenv("MONITOR_SCALE") == "" {
-		t.Skip("set MONITOR_SCALE=1 to run the M6.4 scale measurement")
+		t.Skip("set MONITOR_SCALE=1 to run the scale measurement")
 	}
 	var st *Store
 	if dbPath := os.Getenv("MONITOR_SCALE_DB"); dbPath != "" {
@@ -79,7 +79,7 @@ func TestScaleLatency(t *testing.T) {
 	}
 
 	// The retention cycle, which shares the single writer with ingest. The
-	// per-issue cap is the pass M6.4 rewrote.
+	// per-issue cap is the pass rewrote.
 	start = time.Now()
 	n1, err := st.PruneIssueOccurrences(50)
 	if err != nil {
@@ -95,7 +95,7 @@ func TestScaleLatency(t *testing.T) {
 	}
 	t.Logf("PruneOccurrencesBefore(30d): %v, %d rows", time.Since(start).Round(time.Millisecond), n2)
 
-	// The archive is what bounds the issues table (M6.4): the staleIssues rows
+	// The archive is what bounds the issues table: the staleIssues rows
 	// are a year old with a year-old occurrence, so exactly they must archive.
 	// MONITOR_SCALE_NO_ARCHIVE leaves the stale tail un-archived so the BINARY's
 	// own retention tick can be watched doing it (it logs the archive count).

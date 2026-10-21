@@ -83,7 +83,7 @@ func TestXHProfHandlerRejectsGarbage(t *testing.T) {
 }
 
 // A callgraph shipped with trace_id in its tags must land on the same trace
-// as the request profiles (#180): the trace page stitches code-execution
+// as the request profiles : the trace page stitches code-execution
 // detail into the waterfall through this link.
 func TestXHProfHandlerStoresTraceID(t *testing.T) {
 	st := newBenchStore(t)
@@ -112,7 +112,7 @@ func TestXHProfHandlerStoresTraceID(t *testing.T) {
 	}
 }
 
-// The xhprof ingest must also store the rebuilt call tree (#181) so the
+// The xhprof ingest must also store the rebuilt call tree  so the
 // trace/profile pages can render the stack, not just the flat list.
 func TestXHProfHandlerStoresCallTree(t *testing.T) {
 	st := newBenchStore(t)

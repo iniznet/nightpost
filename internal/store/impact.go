@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// User impact (#158): every occurrence records the opaque id of the acting
+// User impact : every occurrence records the opaque id of the acting
 // user when the producer knew it. Raw id only — never email, name or any
 // other PII (redaction rule from the ticket invariants). Counts answer
 // "how many distinct readers felt this?" without storing identities beyond

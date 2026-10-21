@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// Release health (#158): deploy markers arrive via POST /ingest/{project}/release
+// Release health : deploy markers arrive via POST /ingest/{project}/release
 // (CI webhook or boot publisher). The table is HARD-CAPPED at 100 rows per
 // project on every insert — newest kept — so a crash-loop that re-POSTs its
 // release can never grow the table.

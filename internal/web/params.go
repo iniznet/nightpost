@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-// One dialect, one reader. The M6.1 pre-mortem guard is explicit: every page
+// One dialect, one reader. The pre-mortem guard is explicit: every page
 // parses the persistent context (project, time range, environment) through
 // parseToolbar and nothing else, because per-page re-typing is how a filter
 // silently resets when a link drops one field.

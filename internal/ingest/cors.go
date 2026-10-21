@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// CORS for the browser reporter routes (M6.5).
+// CORS for the browser reporter routes.
 //
 // The allowlist used to be one global -cors-origin string applied to every
 // browser route, which a multi-tenant install cannot express: each tenant's
@@ -125,7 +125,7 @@ func (c *CORSResolver) OriginFor(r *http.Request) string {
 		}
 	}
 	// Bound the map: project names arrive from the ingest path, so the cache
-	// must never be a growth vector (the M6.10 rule applied to a new map).
+	// must never be a growth vector (the rule applied to a new map).
 	c.mu.Lock()
 	if len(c.cache) >= maxCORSCache {
 		c.evictLocked()
