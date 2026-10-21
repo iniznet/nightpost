@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/iniznet/fenrirealm-monitor/internal/store"
+	"github.com/iniznet/nightpost/internal/store"
 )
 
 // wireVector is one golden vector from testdata/wire: the canonical payload for

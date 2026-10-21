@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/iniznet/fenrirealm-monitor/internal/store"
+	"github.com/iniznet/nightpost/internal/store"
 )
 
 // TestSettingsPageRendersAndSaves is the M6.3 done-when in miniature: a

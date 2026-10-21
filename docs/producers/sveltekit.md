@@ -1,7 +1,8 @@
 # Producer: SvelteKit / Node
 
-The reference wiring in this organisation lives in **fenrirealm-front**
-(`src/lib/server/monitor.ts`, called from `src/hooks.server.ts`).
+The reference wiring is a single server module (`src/lib/server/monitor.ts`,
+called from `src/hooks.server.ts`); `@nightpost/sveltekit` packages the same
+shape.
 
 ## Environment
 
@@ -39,7 +40,7 @@ request: telemetry that can fail a page render is a regression, not a feature.
 ## Browser-side
 
 A page reporter needs CORS, and the allowlist is **per project** — set it at
-`/keys` for the deployment's origin (e.g. `https://fenrirealm.com`). An origin
+`/keys` for the deployment's origin (e.g. `https://app.example.com`). An origin
 that is present but unlisted is refused `403` rather than silently dropped, so a
 misconfigured origin shows up in the network tab instead of losing data quietly.
 A wildcard is refused by the server; name each origin explicitly.

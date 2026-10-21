@@ -8,14 +8,14 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/iniznet/fenrirealm-monitor/internal/store"
+	"github.com/iniznet/nightpost/internal/store"
 )
 
 // XHProfHandler accepts the wire format spiral-packages/profiler's WebStorage
 // POSTs (via maantje/xhprof-buggregator-laravel, pointed at PROFILER_ENDPOINT):
 //
 //	{"profile": {"main()": {"ct":1,"wt":1000000,...}, "main()==>Fn::bar": {...}},
-//	 "tags": {"env": "production", "host": "..."}, "app_name": "fenrirealm-backend",
+//	 "tags": {"env": "production", "host": "..."}, "app_name": "myapp",
 //	 "hostname": "...", "date": 1728300000}
 //
 // Trace keys are classic xhprof "parent==>child" edges ("main()" root entries

@@ -1,4 +1,4 @@
-# fenrirealm-monitor — first-party observability ingest (iniznet/fenrirealm-tracker#141 #145)
+# nightpost — first-party observability ingest (iniznet/fenrirealm-tracker#141 #145)
 
 # Build stage: static binary, CGO off (modernc.org/sqlite is pure Go — the
 # image needs no gcc/libc headers). Toolchain pinned to go.mod's requirement

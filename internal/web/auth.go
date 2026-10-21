@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/iniznet/fenrirealm-monitor/internal/store"
+	"github.com/iniznet/nightpost/internal/store"
 )
 
 // Auth gates every dashboard page behind a single-admin session (#157).

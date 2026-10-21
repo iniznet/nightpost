@@ -1,8 +1,8 @@
 # Producer: Laravel
 
-The Laravel-side plumbing lives in **fenrirealm-backend** (`App\Support\Monitor`,
-`App\Support\Profiler` and the `monitor` logging channel). This page is the
-operational half: what to set, and in what order.
+The Laravel-side plumbing is the `nightpost/laravel` Composer package (the
+monitor client, the profiler and the `monitor` logging channel). This page is
+the operational half: what to set, and in what order.
 
 ## Order of operations
 
@@ -10,7 +10,7 @@ operational half: what to set, and in what order.
 window.** Rotating or revoking a key takes effect immediately, so the gap between
 the two steps is a window where ingest is refused (`401`).
 
-1. **`/keys`** — issue a key for the project (e.g. `fenrirealm-backend`).
+1. **`/keys`** — issue a key for the project (e.g. `my-laravel-app`).
 2. Set the producer env (below).
 3. Reload the producer. Nothing is enabled until step 2 lands.
 

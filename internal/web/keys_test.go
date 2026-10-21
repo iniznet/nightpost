@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/iniznet/fenrirealm-monitor/internal/ingest"
-	"github.com/iniznet/fenrirealm-monitor/internal/store"
+	"github.com/iniznet/nightpost/internal/ingest"
+	"github.com/iniznet/nightpost/internal/store"
 )
 
 var flashRe = regexp.MustCompile(`class="mono">([0-9a-f]{48})<`)

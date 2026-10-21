@@ -1,4 +1,4 @@
-# fenrirealm-monitor — the sink every platform sender points at
+# nightpost — the sink every platform sender points at
 # (iniznet/fenrirealm-tracker#145). Replaces the retired third-party server:
 # one static Go binary, real SQLite volume (state SURVIVES restarts — the old
 # sink was deliberately in-memory), UI bound to HOST LOOPBACK only.
@@ -15,7 +15,7 @@
 # UI: NOT published to the host. It HAS auth (M4: HMAC session cookie +
 # first-run /setup), but it is still not meant to ride Dokploy ingress — reach
 # it through the docker network or ad hoc:
-#   docker exec fenrirealm-monitor-production wget -qO- http://127.0.0.1:8000/up
+#   docker exec nightpost-production wget -qO- http://127.0.0.1:8000/up
 # or run a one-off `docker compose up` override that adds a ports: mapping.
 #
 # Persistence: profiles + issues are only as useful as their history — the
@@ -58,8 +58,8 @@
 services:
   monitor:
     build: .
-    image: fenrirealm-monitor:latest
-    container_name: fenrirealm-monitor-${APP_ENV:-production}
+    image: nightpost:latest
+    container_name: nightpost-${APP_ENV:-production}
     restart: unless-stopped
     # NO host port publishing: every consumer (Monolog senders, Laravel
     # MonitorClient, SvelteKit reporter) reaches the service by name over

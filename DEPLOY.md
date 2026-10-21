@@ -9,13 +9,13 @@ public.
 ### From the published image
 
 The release pipeline publishes a multi-arch (amd64 + arm64) image to GHCR on
-every `v*` tag — `ghcr.io/iniznet/fenrirealm-monitor`. To use it instead of
+every `v*` tag — `ghcr.io/iniznet/nightpost`. To use it instead of
 building locally, point compose at the image:
 
 ```yaml
 services:
   monitor:
-    image: ghcr.io/iniznet/fenrirealm-monitor:latest
+    image: ghcr.io/iniznet/nightpost:latest
     # ...the rest of docker-compose.yml unchanged
 ```
 
@@ -25,7 +25,7 @@ package needs `docker login ghcr.io` once on the host.
 ### From source
 
 ```sh
-git clone <repo> && cd fenrirealm-monitor
+git clone <repo> && cd nightpost
 printf 'APP_ENV=production\n' > .env
 docker compose up -d --build
 docker compose exec monitor wget -qO- http://127.0.0.1:8000/ready
@@ -44,7 +44,7 @@ reaches the service by name over the docker network, and host bindings fight
 other projects on a shared node. To reach the UI ad hoc:
 
 ```sh
-docker exec fenrirealm-monitor-production wget -qO- http://127.0.0.1:8000/up
+docker exec nightpost-production wget -qO- http://127.0.0.1:8000/up
 ```
 
 ### Senders are never enabled silently
@@ -137,10 +137,9 @@ a running producer: a project that already exists without a key stays admitted
 
 Prefer `-require-registered` first if you must stage the change — it is the
 narrower refusal, and the bounded auto-provision budget exists to make a flood
-pointless rather than to make unsigned ingest safe. The product build flips
-`-require-registered`'s default to on at fork time; this repo keeps it off by
-default so deploying an existing install never changes its ingress posture
-without an operator saying so.
+pointless rather than to make unsigned ingest safe. This product build flips
+`-require-registered`'s default to on (M6.7); pass `-require-registered=false`
+to restore the legacy auto-provision posture for an existing install.
 
 Then tune the ceilings for the real traffic shape:
 

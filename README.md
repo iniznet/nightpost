@@ -1,6 +1,6 @@
-# fenrirealm-monitor
+# nightpost
 
-Self-hosted observability ingest for the fenrirealm platform (and anything else
+Self-hosted observability ingest for any PHP + JS stack (and anything else
 that speaks its wire spec): errors, request profiles, callgraphs, slow queries,
 job/command runs, deploy markers and log lines — into one binary and one SQLite
 file, with a zero-JavaScript dashboard.
@@ -11,7 +11,7 @@ start, which deploy was live, and why was it slow.*
 ## Quickstart
 
 ```sh
-git clone <this repo> && cd fenrirealm-monitor
+git clone <this repo> && cd nightpost
 printf 'APP_ENV=production\n' > .env
 docker compose up -d --build
 docker compose exec monitor wget -qO- http://127.0.0.1:8000/ready

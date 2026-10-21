@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/iniznet/fenrirealm-monitor/internal/store"
+	"github.com/iniznet/nightpost/internal/store"
 )
 
 // foldTrace math, asserted exactly (microseconds in -> ms out):

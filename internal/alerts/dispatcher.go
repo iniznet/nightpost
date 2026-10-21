@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/iniznet/fenrirealm-monitor/internal/store"
+	"github.com/iniznet/nightpost/internal/store"
 )
 
 // Sender delivers one alert to one channel.

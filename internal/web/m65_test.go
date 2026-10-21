@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/iniznet/fenrirealm-monitor/internal/ingest"
+	"github.com/iniznet/nightpost/internal/ingest"
 )
 
 type fakeInvalidator struct{ dropped []string }

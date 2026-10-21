@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/iniznet/fenrirealm-monitor/internal/store"
+	"github.com/iniznet/nightpost/internal/store"
 )
 
 func newTestServer(t *testing.T) (*httptest.Server, *store.Store) {

@@ -7,7 +7,7 @@ import (
     "net/http"
     "strings"
 
-    "github.com/iniznet/fenrirealm-monitor/internal/store"
+    "github.com/iniznet/nightpost/internal/store"
 )
 
 const maxEnvelopeBytes = 10 << 20 // 10 MiB

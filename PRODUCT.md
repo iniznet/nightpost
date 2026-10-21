@@ -6,7 +6,7 @@
 
 ## What this is
 
-fenrirealm-monitor is the first-party observability sink for the Fenrir Realm
+nightpost is the first-party observability sink for the Fenrir Realm
 platform (iniznet/fenrirealm-tracker#145): one static Go binary ingesting
 exceptions, logs and performance profiles from every first-party stack — Laravel
 11 backend (PHP), SvelteKit reader frontend and SvelteKit admin panel
@@ -20,7 +20,7 @@ before any fork.
 
 ## Who uses it
 
-The fenrirealm developers, on-call or investigating after a deploy. Sessions
+The operator's developers, on-call or investigating after a deploy. Sessions
 are short and goal-directed: "something is slow/broken right now — which
 defect, where, since when".
 

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/iniznet/fenrirealm-monitor/internal/store"
+	"github.com/iniznet/nightpost/internal/store"
 )
 
 func TestPrettifyFn(t *testing.T) {
