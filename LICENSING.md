@@ -74,7 +74,7 @@ the claim true.
 - **The fenrirealm production instance.** Its data, deployment env and Dokploy
   configuration are private.
 
-## Open item: the CLA / DCO question
+## Decided: DCO (2026-10-21)
 
 Apache-2.0 section 5 makes contributions inbound=outbound, which is all a
 permissively licensed project strictly needs. But it also means every outside
@@ -91,9 +91,10 @@ cheapest to make **now**, while the copyright holders are still only us:
   provenance.
 - **CLA.** Keeps relicensing possible; adds friction and a document to maintain.
 
-Recommended: **DCO** - it preserves the audit trail at near-zero friction, given
-relicensing is not currently intended. Whichever is chosen, add it to
-`CONTRIBUTING.md` at fork time.
+**Decided: DCO** (2026-10-21, operator decision on iniznet/fenrirealm-tracker#278)
+- it preserves the audit trail at near-zero friction, given relicensing is not
+currently intended. The sign-off requirement lives in `CONTRIBUTING.md`;
+relicensing is now off the table after the first outside patch.
 
 ## The irreversible step
 
