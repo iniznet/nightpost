@@ -63,10 +63,13 @@ two ecosystems is the wedge, not breadth.
 | [docs/README.md](docs/README.md) | docs index, and why there is no site generator |
 | [DEPLOY.md](DEPLOY.md) | install, ingress, upgrade, recovery |
 | [PRODUCT.md](PRODUCT.md) / [DESIGN.md](DESIGN.md) | what it is and how it is shaped |
-| [LICENSING.md](LICENSING.md) | open-core decision, dependency audit, the CLA question |
 | [AGENTS.md](AGENTS.md) | the invariants this codebase is held to |
 
 ## Licence
 
-AGPL-3.0 ([LICENSE](LICENSE), [NOTICE](NOTICE)). Producer packages are MIT.
-The managed control plane is a separate product and is not in this repository.
+AGPL-3.0 ([LICENSE](LICENSE), [NOTICE](NOTICE)). Producer packages are MIT
+(`nightpost/laravel`, `@nightpost/*`). Contributions are DCO-signed — see
+[CONTRIBUTING.md](CONTRIBUTING.md). The grant does not cover the Nightpost
+brand, the managed control plane (a separate product, not in this
+repository), or the operators' production deployment. Components linked into
+the shipped binary and their licences are listed in [NOTICE](NOTICE).

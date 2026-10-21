@@ -22,5 +22,5 @@ be merged.
 Why DCO and not a CLA: DCO keeps the contribution flow friction-free and
 documents provenance. It also means inbound=outbound permanently — a future
 relicence (e.g. to BUSL) would need every contributor's consent. That is a
-deliberate trade recorded in LICENSING.md ("Alternatives considered"); the
-decision window for a CLA closes with the first outside patch.
+deliberate trade; the decision window for a CLA closes with the first
+outside patch.
