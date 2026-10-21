@@ -9,8 +9,8 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/iniznet/fenrirealm-monitor/internal/store"
-	"github.com/iniznet/fenrirealm-monitor/internal/web"
+	"github.com/iniznet/nightpost/internal/store"
+	"github.com/iniznet/nightpost/internal/web"
 )
 
 // TestReadyHandlerReportsOK pins the readiness contract's shape.

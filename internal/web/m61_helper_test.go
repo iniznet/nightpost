@@ -1,6 +1,6 @@
 package web
 
-import "github.com/iniznet/fenrirealm-monitor/internal/store"
+import "github.com/iniznet/nightpost/internal/store"
 
 // store_ProfileInputFront is a named constructor so the route tests can seed a
 // traced, tree-bearing profile without importing the store package twice.

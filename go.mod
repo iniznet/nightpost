@@ -1,4 +1,4 @@
-module github.com/iniznet/fenrirealm-monitor
+module github.com/iniznet/nightpost
 
 go 1.26.0
 

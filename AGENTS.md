@@ -1,4 +1,4 @@
-# fenrirealm-monitor — Agent Instructions
+# nightpost — Agent Instructions
 
 One static Go binary ingesting exceptions, logs and performance profiles for every first-party Fenrir Realm stack (Laravel backend = PHP, SvelteKit front/admin = JavaScript). UI is server-rendered html/template with zero runtime JS.
 

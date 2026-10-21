@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/iniznet/fenrirealm-monitor/internal/store"
+	"github.com/iniznet/nightpost/internal/store"
 )
 
 // queryPayload is the additive slow-query wire contract (#157). Producers

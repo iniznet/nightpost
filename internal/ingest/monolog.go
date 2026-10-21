@@ -6,7 +6,7 @@ import (
 	"log"
 	"net"
 
-	"github.com/iniznet/fenrirealm-monitor/internal/store"
+	"github.com/iniznet/nightpost/internal/store"
 )
 
 // Monolog is the drop-in replacement for the Buggregator log socket: a TCP

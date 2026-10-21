@@ -17,10 +17,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/iniznet/fenrirealm-monitor/internal/alerts"
-	"github.com/iniznet/fenrirealm-monitor/internal/ingest"
-	"github.com/iniznet/fenrirealm-monitor/internal/store"
-	"github.com/iniznet/fenrirealm-monitor/internal/web"
+	"github.com/iniznet/nightpost/internal/alerts"
+	"github.com/iniznet/nightpost/internal/ingest"
+	"github.com/iniznet/nightpost/internal/store"
+	"github.com/iniznet/nightpost/internal/web"
 )
 
 func main() {
@@ -37,7 +37,7 @@ func main() {
 	ingressGlobalBurst := flag.Float64("ingress-global-burst", 1000, "M6.10 coarse ingest burst across all projects")
 	ingressIPRate := flag.Float64("ingress-ip-rate", 100, "M6.10 coarse ingest ceiling per source address, events/s (0 disables — the right setting behind a reverse proxy, where every request shares the proxy address)")
 	ingressIPBurst := flag.Float64("ingress-ip-burst", 200, "M6.10 coarse per-source-address burst")
-	requireRegistered := flag.Bool("require-registered", false, "refuse an ingest POST that names a project nobody registered (401) instead of auto-provisioning it; MANDATORY with a public ingress, and the product build flips the default to true at fork time")
+	requireRegistered := flag.Bool("require-registered", true, "refuse an ingest POST that names a project nobody registered (401) instead of auto-provisioning it; default ON in this product build (M6.10) - pass -require-registered=false to restore the legacy auto-provision posture")
 	maxAutoProjects := flag.Int("max-auto-projects", 500, "max projects auto-provisioned from unsigned ingest before a NEW name is refused (0 = unbounded)")
 	requireIngestKeys := flag.Bool("require-ingest-keys", false, "refuse unsigned ingest entirely — set this once ingest is reachable through a public ingress")
 	sessionSecret := flag.String("session-secret", "", "HMAC key for dashboard session cookies (empty = random per boot; sessions die on restart)")
@@ -194,7 +194,7 @@ func main() {
 		_ = srv.Shutdown(ctx)
 	}()
 
-	log.Printf("fenrirealm-monitor listening on %s (socket %s)", *httpAddr, *sockAddr)
+	log.Printf("nightpost listening on %s (socket %s)", *httpAddr, *sockAddr)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatalf("http server: %v", err)
 	}

@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/iniznet/fenrirealm-monitor/internal/store"
+	"github.com/iniznet/nightpost/internal/store"
 )
 
 // Call-tree caps (#181): a production PHP request explodes into thousands of

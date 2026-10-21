@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/iniznet/fenrirealm-monitor/internal/ingest"
-	"github.com/iniznet/fenrirealm-monitor/internal/store"
+	"github.com/iniznet/nightpost/internal/ingest"
+	"github.com/iniznet/nightpost/internal/store"
 )
 
 // newServer runs the REAL ingest handlers, so this test proves the reference

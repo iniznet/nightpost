@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/iniznet/fenrirealm-monitor/internal/store"
+	"github.com/iniznet/nightpost/internal/store"
 )
 
 // ProfileHandler accepts a sampled request profile from the first-party

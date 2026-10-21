@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/iniznet/fenrirealm-monitor/internal/store"
+	"github.com/iniznet/nightpost/internal/store"
 )
 
 // TestIngestHealthStripCountsEveryLeg pins the M6.10 footer contract: each

@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/iniznet/fenrirealm-monitor/internal/store"
+	"github.com/iniznet/nightpost/internal/store"
 )
 
 // releasePayload is the additive deploy-marker wire contract (#158).

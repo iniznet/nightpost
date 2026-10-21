@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/iniznet/fenrirealm-monitor/internal/ingest"
-	"github.com/iniznet/fenrirealm-monitor/internal/store"
+	"github.com/iniznet/nightpost/internal/ingest"
+	"github.com/iniznet/nightpost/internal/store"
 )
 
 func TestBuildTraceViewAnchorsBackendInsideFetchWindow(t *testing.T) {

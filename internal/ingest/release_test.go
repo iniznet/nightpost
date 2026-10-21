@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/iniznet/fenrirealm-monitor/internal/store"
+	"github.com/iniznet/nightpost/internal/store"
 )
 
 func doRelease(t *testing.T, st *store.Store, body string) int {

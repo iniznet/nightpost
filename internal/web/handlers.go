@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/iniznet/fenrirealm-monitor/internal/ingest"
-	"github.com/iniznet/fenrirealm-monitor/internal/store"
+	"github.com/iniznet/nightpost/internal/ingest"
+	"github.com/iniznet/nightpost/internal/store"
 )
 
 //go:embed templates/*.html

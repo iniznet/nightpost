@@ -40,7 +40,7 @@ adopted or it is not, and nothing in a package needs a patent clause.
 asserted, because the link set is exact:
 
 ```sh
-go list -deps ./cmd/monitor | grep '\.' | grep -v '^github.com/iniznet/fenrirealm-monitor'
+go list -deps ./cmd/monitor | grep '\.' | grep -v '^github.com/iniznet/nightpost'
 ```
 
 That lists every third-party package actually compiled into the binary, which is
@@ -108,7 +108,7 @@ before the repository or the packages become public, not after.
 ## Actions at fork time (M6.7)
 
 1. Copyright holder and year in `NOTICE`.
-2. Go module path: `github.com/iniznet/fenrirealm-monitor` to the Nightpost path.
+2. Go module path: `github.com/iniznet/nightpost` to the Nightpost path.
 3. Repository rename plus the `fenrirealm-*` brand scrub (strings, install paths,
    docs).
 4. Producer packages published as `nightpost/laravel` and `@nightpost/*`.

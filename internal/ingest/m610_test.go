@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/iniznet/fenrirealm-monitor/internal/store"
+	"github.com/iniznet/nightpost/internal/store"
 )
 
 // TestGuardThrottlesDistinctNameFlood is the M6.10 P0 guard: the per-project
