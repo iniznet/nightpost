@@ -106,12 +106,31 @@ section 2 grants a perpetual, irrevocable copyright licence for every copy
 distributed, so a published grant cannot be recalled. Confirm this decision
 before the repository or the packages become public, not after.
 
-## Actions at fork time (M6.7)
+**Decision recorded 2026-10-21** (operator, iniznet/fenrirealm-tracker#278):
+the fork repository and the producer packages go PUBLIC. The Apache-2.0 grant
+takes effect the moment the visibility flips; a Packagist/npm publish later
+extends the same grant, it does not create a new one.
 
-1. Copyright holder and year in `NOTICE`.
-2. Go module path: `github.com/iniznet/nightpost` to the Nightpost path.
-3. Repository rename plus the `fenrirealm-*` brand scrub (strings, install paths,
-   docs).
-4. Producer packages published as `nightpost/laravel` and `@nightpost/*`.
-5. Flip `-require-registered` to default-on in the product build (M6.10).
-6. Add `CONTRIBUTING.md` with the chosen DCO/CLA line.
+## Fork-time actions (M6.7) — completion ledger
+
+The section below was written before the fork, in future tense. Each line now
+carries its status, so the list stays an accurate record instead of a stale
+to-do.
+
+1. **Copyright holder and year in `NOTICE`** — DONE. `NOTICE` reads
+   `nightpost ... Copyright 2026 iniznet`.
+2. **Go module path rename** — DONE. `module github.com/iniznet/nightpost`
+   across go.mod, imports and the dependency-audit grep (iniznet/nightpost#1).
+3. **Repository rename plus the `fenrirealm-*` brand scrub** — DONE for the
+   repository: the product repo is `iniznet/nightpost` (a private mirror that
+   goes public; GitHub cannot fork a repo into the org that owns it). The
+   string scrub landed in the same PR (#1). Tracker citations
+   (`iniznet/fenrirealm-tracker#N`) stay on purpose: provenance, not brand.
+4. **Producer packages** — BUILT, publication pending. `nightpost/laravel`
+   (v0.1.0), `@nightpost/js`, `@nightpost/sveltekit` exist as repositories
+   under iniznet; the visibility flip below publishes them. A Packagist/npm
+   registry publish is optional later and does not change the grant.
+5. **Flip `-require-registered` to default-on** — DONE (iniznet/nightpost#1);
+   legacy posture via `-require-registered=false`.
+6. **`CONTRIBUTING.md` with the DCO line** — DONE (2026-10-21): DCO chosen,
+   sign-off required, relicensing closed after the first outside patch.
