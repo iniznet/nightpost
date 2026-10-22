@@ -31,9 +31,8 @@ func TestShaperProjectsIsolated(t *testing.T) {
 	}
 }
 
-// TestShaperBudgetAppliesLive pins iniznet/fenrirealm-tracker#363: a budget
-// change reaches the RUNNING shaper, so a saved ingest_rate/ingest_burst no
-// longer needs a restart to apply.
+// TestShaperBudgetAppliesLive pins the live budget. A change must reach the
+// RUNNING shaper, so a saved ingest_rate needs no restart to apply.
 func TestShaperBudgetAppliesLive(t *testing.T) {
 	sh := NewShaper(0.0001, 1)
 	if !sh.Allow("backend") {

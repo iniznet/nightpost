@@ -64,9 +64,9 @@ func TestReadyHandlerReportsOK(t *testing.T) {
 	}
 }
 
-// TestApplyBudgetReadsTheSettingsTable is the defect's own guard: before
-// iniznet/fenrirealm-tracker#363 a saved ingest_rate/ingest_burst was stored,
-// rendered, and read by nothing.
+// TestApplyBudgetReadsTheSettingsTable guards the wiring a saved budget needs.
+// Before the fix, ingest_rate and ingest_burst were stored, rendered, and read
+// by nothing.
 func TestApplyBudgetReadsTheSettingsTable(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {

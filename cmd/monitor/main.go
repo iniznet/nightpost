@@ -387,8 +387,8 @@ func applyBudget(st *store.Store, sh *ingest.Shaper, fallbackRate, fallbackBurst
 }
 
 // budgetLoop keeps the per-project ingest budget in step with the settings
-// table. Without it a saved value is stored, displayed and inert — the defect
-// iniznet/fenrirealm-tracker#363 fixed.
+// table. Without it a saved value never reaches the limiter: the page stores
+// it, and the shaper never reads it.
 func budgetLoop(st *store.Store, sh *ingest.Shaper, fallbackRate, fallbackBurst float64) {
 	rate, burst := applyBudget(st, sh, fallbackRate, fallbackBurst)
 	for {
