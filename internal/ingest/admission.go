@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"math"
 	"net/http"
 	"sort"
 	"sync"
@@ -13,8 +14,11 @@ import (
 // never translate into unbounded store writes. Requests past the budget get
 // a cheap 429 before any body read or DB work.
 type Shaper struct {
-	rate       float64 // tokens per second
-	burst      float64
+	// rate and burst are LIVE. SetBudget rewrites them while ingest is
+	// serving, so an operator's saved setting applies without a restart;
+	// atomics keep the admission path free of a second lock.
+	rateBits   atomic.Uint64 // float64: tokens per second
+	burstBits  atomic.Uint64 // float64: burst ceiling
 	maxBuckets int
 
 	rejected atomic.Int64
@@ -54,27 +58,49 @@ type tokenBucket struct {
 // NewShaper builds a per-project limiter at perSecond tokens with burst
 // ceiling; zero/negative inputs fall back to the defaults (50/s, burst 100).
 func NewShaper(perSecond, burst float64) *Shaper {
+	sh := &Shaper{maxBuckets: maxShaperBuckets, buckets: map[string]*tokenBucket{}}
+	sh.SetBudget(perSecond, burst)
+	return sh
+}
+
+// Budget reports the live per-project budget (tokens/s, burst ceiling).
+func (sh *Shaper) Budget() (rate, burst float64) {
+	return math.Float64frombits(sh.rateBits.Load()), math.Float64frombits(sh.burstBits.Load())
+}
+
+// SetBudget replaces the live per-project budget and reports what it applied.
+// The settings poller calls it, so an operator's change at /settings (or an
+// operator API write) never needs a restart. Safe while ingest serves: readers
+// take the two atomics once per event, and an existing bucket clamps to the new
+// burst on its next take.
+//
+// Zero or negative inputs fall back to the shipped defaults, exactly like
+// NewShaper — a corrupted settings row must not stop admission entirely.
+func (sh *Shaper) SetBudget(perSecond, burst float64) (float64, float64) {
 	if perSecond <= 0 {
 		perSecond = 50
 	}
 	if burst <= 0 {
 		burst = 100
 	}
-	return &Shaper{rate: perSecond, burst: burst, maxBuckets: maxShaperBuckets, buckets: map[string]*tokenBucket{}}
+	sh.rateBits.Store(math.Float64bits(perSecond))
+	sh.burstBits.Store(math.Float64bits(burst))
+	return perSecond, burst
 }
 
 // Allow reports whether one ingest event for the project fits its budget.
 func (sh *Shaper) Allow(project string) bool {
+	rate, burst := sh.Budget()
 	now := time.Now()
 	sh.mu.Lock()
 	defer sh.mu.Unlock()
 	b := sh.buckets[project]
 	if b == nil {
 		sh.evictBucketsLocked()
-		b = &tokenBucket{tokens: sh.burst, last: now}
+		b = &tokenBucket{tokens: burst, last: now}
 		sh.buckets[project] = b
 	}
-	return take(b, sh.rate, sh.burst, now)
+	return take(b, rate, burst, now)
 }
 
 // evictBucketsLocked drops the least-recently-seen half of the bucket map once

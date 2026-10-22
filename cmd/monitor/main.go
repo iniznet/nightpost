@@ -74,7 +74,13 @@ func main() {
 	}
 
 	mon := &ingest.Monolog{Store: st}
-	sh := ingest.NewShaper(*ingestRate, *ingestBurst)
+	// the budget is LIVE: seeded from the settings table (the flag is the
+	// import-once fallback) and refreshed by budgetLoop, so /settings and the
+	// operator API can change a plan's ingest ceiling without a restart.
+	sh := ingest.NewShaper(
+		st.SettingFloat(store.SettingIngestRate, *ingestRate),
+		st.SettingFloat(store.SettingIngestBurst, *ingestBurst),
+	)
 	gate := ingest.NewKeyGate(st, 5*time.Second)
 	gate.ConfigureAutoProvision(*maxAutoProjects, *requireIngestKeys)
 	gate.RequireRegistered(*requireRegistered)
@@ -124,6 +130,7 @@ func main() {
 	}()
 
 	go retentionLoop(st, *retentionDays, *pruneInterval)
+	go budgetLoop(st, sh, *ingestRate, *ingestBurst)
 
 	mux := http.NewServeMux()
 	// route order: coarse guard → key gate → per-project shaper →
@@ -360,6 +367,38 @@ func pruneMinutes(d time.Duration) int {
 		m = 1
 	}
 	return m
+}
+
+// ingestBudgetRefresh bounds how long a saved ingest_rate/ingest_burst can sit
+// unapplied. Ten seconds is short enough that an operator watching the page
+// sees the change take effect, long enough that two primary-key reads cost
+// nothing on the reader pool.
+const ingestBudgetRefresh = 10 * time.Second
+
+// applyBudget reads the two budget keys and applies them to the shaper. It
+// returns the applied pair so the poller can log a change exactly once. Absent
+// or unparseable rows fall back to the flags, which are the same import-once
+// defaults the settings page renders.
+func applyBudget(st *store.Store, sh *ingest.Shaper, fallbackRate, fallbackBurst float64) (float64, float64) {
+	return sh.SetBudget(
+		st.SettingFloat(store.SettingIngestRate, fallbackRate),
+		st.SettingFloat(store.SettingIngestBurst, fallbackBurst),
+	)
+}
+
+// budgetLoop keeps the per-project ingest budget in step with the settings
+// table. Without it a saved value is stored, displayed and inert — the defect
+// iniznet/fenrirealm-tracker#363 fixed.
+func budgetLoop(st *store.Store, sh *ingest.Shaper, fallbackRate, fallbackBurst float64) {
+	rate, burst := applyBudget(st, sh, fallbackRate, fallbackBurst)
+	for {
+		time.Sleep(ingestBudgetRefresh)
+		nextRate, nextBurst := applyBudget(st, sh, fallbackRate, fallbackBurst)
+		if nextRate != rate || nextBurst != burst {
+			log.Printf("ingest budget: %.3g events/s, burst %.3g (applied from settings, no restart)", nextRate, nextBurst)
+			rate, burst = nextRate, nextBurst
+		}
+	}
 }
 
 // retentionLoop keeps the store bounded: occurrences age out, per-issue
