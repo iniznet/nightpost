@@ -458,8 +458,8 @@ var settingMeta = []struct {
 	{store.SettingPruneMinutes, "Prune interval (minutes)", "How often the retention cycle runs. Re-read every cycle, so a change applies without a restart.", true},
 	{store.SettingOccurrenceCap, "Occurrence cap per fingerprint / minute", "0 = unlimited. Caps stored occurrence rows while issue counts stay accurate.", true},
 	{store.SettingProfilesPerProject, "Profiles kept per project", "PER PROJECT: one noisy producer can no longer evict another org's profile and trace window.", true},
-	{store.SettingIngestRate, "Ingest rate (events/s per project)", "Token-bucket refill rate; requests past the budget get a cheap 429 before any body read.", false},
-	{store.SettingIngestBurst, "Ingest burst ceiling (per project)", "Token-bucket burst ceiling.", false},
+	{store.SettingIngestRate, "Ingest rate (events/s per project)", "Token-bucket refill rate; requests past the budget get a cheap 429 before any body read. Re-read from this table every few seconds.", true},
+	{store.SettingIngestBurst, "Ingest burst ceiling (per project)", "Token-bucket burst ceiling, re-read from this table every few seconds.", true},
 }
 
 // handleSettings is the settings surface: every operator-tunable value

@@ -60,9 +60,9 @@ retention window, the prune interval, the per-fingerprint occurrence cap, the
 profiles kept per project, and the ingest rate/burst. The process flags are
 **import-once defaults** — a key is seeded only when absent, so a value saved
 in the UI wins from then on, across restarts and redeploys. The retention loop
-re-reads its knobs every cycle (marked *live* on the page); the ingest
-rate/burst are built into the shaper at boot (marked *restart*), and the page
-says so rather than pretending otherwise.
+re-reads its knobs every cycle, and the shaper re-reads the rate/burst rows
+every ten seconds, so every key is marked *live* on the page and a saved value
+applies without a restart.
 ## Tenancy
 An **org** groups projects; every project carries an additive `org_id` and
 every project not explicitly assigned belongs to `Default`. Assignment never

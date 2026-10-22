@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/iniznet/nightpost/internal/ingest"
 	"github.com/iniznet/nightpost/internal/store"
 	"github.com/iniznet/nightpost/internal/web"
 )
@@ -60,6 +61,52 @@ func TestReadyHandlerReportsOK(t *testing.T) {
 		if _, ok := body[banned]; ok {
 			t.Errorf("readiness leaks %q to an unauthenticated caller", banned)
 		}
+	}
+}
+
+// TestApplyBudgetReadsTheSettingsTable guards the wiring a saved budget needs.
+// Before the fix, ingest_rate and ingest_burst were stored, rendered, and read
+// by nothing.
+func TestApplyBudgetReadsTheSettingsTable(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer st.Close()
+	if err := st.SeedSettings(store.SettingDefaults{
+		RetentionDays:        30,
+		PruneIntervalMinutes: 10,
+		OccurrenceCap:        30,
+		ProfilesPerProject:   5000,
+		IngestRate:           50,
+		IngestBurst:          100,
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	sh := ingest.NewShaper(50, 100)
+	if err := st.SetSetting(store.SettingIngestRate, "12.5"); err != nil {
+		t.Fatalf("set rate: %v", err)
+	}
+	if err := st.SetSetting(store.SettingIngestBurst, "7"); err != nil {
+		t.Fatalf("set burst: %v", err)
+	}
+	applyBudget(st, sh, 50, 100)
+	if rate, burst := sh.Budget(); rate != 12.5 || burst != 7 {
+		t.Fatalf("shaper budget = %v/%v, want the SAVED 12.5/7 (a flag must not win)", rate, burst)
+	}
+
+	// An unseeded key falls back to the flag, never to zero — a fresh install
+	// must not start with admission switched off.
+	bare, err := store.Open(filepath.Join(t.TempDir(), "bare.db"))
+	if err != nil {
+		t.Fatalf("open bare: %v", err)
+	}
+	defer bare.Close()
+	bareShaper := ingest.NewShaper(50, 100)
+	applyBudget(bare, bareShaper, 20, 40)
+	if rate, burst := bareShaper.Budget(); rate != 20 || burst != 40 {
+		t.Fatalf("unseeded budget = %v/%v, want the flag fallback 20/40", rate, burst)
 	}
 }
 
