@@ -44,8 +44,9 @@ func TestEveryRouteRendersWithZeroParams(t *testing.T) {
 func TestUnknownTabNeverFails(t *testing.T) {
 	srv, _ := newTestServer(t)
 	cases := []struct{ path, want string }{
-		{"/errors?tab=nope", "Issues"},
-		{"/errors?tab=", "Issues"},
+		// The exceptions tab was called "Issues" until #526.
+		{"/errors?tab=nope", "Exceptions"},
+		{"/errors?tab=", "Exceptions"},
 		{"/performance?tab=nope", "Endpoints"},
 		{"/performance?tab=", "Endpoints"},
 	}

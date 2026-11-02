@@ -24,13 +24,14 @@ tabular figures. One focal block per page carries the only 24px number.
 1. **Section** — top bar, filled segment (`Now` · `Errors` · `Performance` ·
    `Configure`). Four destinations, because a data surface and a config surface
    are different jobs.
-2. **Tab** — underline, inside the page head, below the `h1`. Errors: Issues |
-   Logs. Performance: Endpoints | Traces | Hotspots | Queries | Jobs.
-   Configure: Keys | Organisations | Settings.
+2. **Tab** — underline, inside the page head, below the `h1`. Errors:
+   Exceptions | Logs. Performance: Endpoints | Traces | Hotspots | Queries |
+   Jobs. Configure: Keys | Organisations | Settings.
 3. **Page** — the `h1`, plus the scope line.
 
 A level never borrows another level's mark. The active state is `aria-current`,
-not a colour alone.
+not a colour alone. A read-only surface renders no action button: the detail page
+says in one line why the action does not exist instead of showing a dead control.
 
 ## Chrome
 

@@ -952,6 +952,12 @@ func (s *server) handleIssues(w http.ResponseWriter, r *http.Request) {
 	data["Spark"] = spark
 	data["Filter"] = f
 	data["NewSince"] = newSince
+	// The level facet is built from what the project actually emits, not from a
+	// hardcoded four. A notice, critical or deprecated level reaches this table
+	// through the exception path too, and a level the form does not offer cannot
+	// be filtered (iniznet/fenrirealm-tracker#526).
+	levels, _ := s.st.Levels(t.Project, f.Type)
+	data["Levels"] = levelOptions(levels, f.Level)
 	ids := make([]int64, 0, len(shown))
 	for _, is := range shown {
 		ids = append(ids, is.ID)
@@ -1002,7 +1008,13 @@ func (s *server) handleIssueDetail(w http.ResponseWriter, r *http.Request) {
 	if from := safeBack(r.URL.Query().Get("from")); from != "" {
 		backPath = from
 	}
-	data := s.baseData(r, t, PageErrors)
+	// The tab strip follows the row, not the route: a log detail opened from the
+	// Logs list must underline Logs (iniznet/fenrirealm-tracker#526).
+	page := PageErrors
+	if issue.Type == "log" {
+		page = PageLogs
+	}
+	data := s.baseData(r, t, page)
 	data["Issue"] = issue
 	data["BackPath"] = backPath
 	if mark, merr := s.st.LatestRelease(issue.ProjectKey, issue.Environment); merr == nil && mark != nil && issue.FirstSeenAt.After(mark.At) {
@@ -1870,8 +1882,13 @@ func buildTreeViews(nodes []store.TreeNode, totalMs float64, depth int) []TreeVi
 	return out
 }
 
-// resolveHandler flips the resolved bit and redirects back to the issues
-// list preserving the project filter.
+// resolveHandler flips the resolved bit on an exception and returns to the list
+// the reader came from.
+//
+// A log group is an event stream, not a defect: there is no resolve state a
+// screen reads, so the request is refused instead of quietly writing a flag
+// nobody sees. The guard lives here, not only in the template, because a POST
+// is reachable without the button (iniznet/fenrirealm-tracker#526).
 func (s *server) resolveHandler(resolved bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
@@ -1879,15 +1896,39 @@ func (s *server) resolveHandler(resolved bool) http.HandlerFunc {
 			s.failStatus(w, r, http.StatusBadRequest, "bad id")
 			return
 		}
-		if _, err := s.st.Issue(id); err != nil {
+		issue, err := s.st.Issue(id)
+		if err != nil {
 			s.failStatus(w, r, http.StatusNotFound, "not found")
+			return
+		}
+		if issue.Type != "error" {
+			s.failStatus(w, r, http.StatusBadRequest, "only exceptions have a resolve state")
 			return
 		}
 		if err := s.st.SetResolved(id, resolved); err != nil {
 			s.fail(w, r, err)
 			return
 		}
+		if back := safeBack(r.FormValue("from")); back != "" {
+			http.Redirect(w, r, back, http.StatusSeeOther)
+			return
+		}
 		t := parseToolbar(r.URL.Query())
 		http.Redirect(w, r, t.Link("/errors", nil), http.StatusSeeOther)
 	}
+}
+
+// levelOptions lists the levels the project emits, keeping the reader's chosen
+// level first when the window no longer contains it, so a deep link never lands
+// on a form with nothing selected.
+func levelOptions(stats []store.LevelCount, selected string) []store.LevelCount {
+	if selected == "" {
+		return stats
+	}
+	for _, lc := range stats {
+		if lc.Level == selected {
+			return stats
+		}
+	}
+	return append([]store.LevelCount{{Level: selected}}, stats...)
 }

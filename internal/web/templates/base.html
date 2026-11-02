@@ -265,7 +265,7 @@ summary::marker{color:var(--faint)}
 
 {{define "tabsErrors"}}
 <nav class="tabs" aria-label="Errors tabs">
-  <a href="{{tl .Toolbar "/errors"}}" class="tab"{{if or (eq .Page "errors") (eq .Page "issues")}} aria-current="page"{{end}}>Issues</a>
+  <a href="{{tl .Toolbar "/errors"}}" class="tab"{{if or (eq .Page "errors") (eq .Page "issues")}} aria-current="page"{{end}}>Exceptions</a>
   <a href="{{tl .Toolbar "/errors" "tab" "logs"}}" class="tab"{{if eq .Page "logs"}} aria-current="page"{{end}}>Logs</a>
 </nav>
 {{end}}

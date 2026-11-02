@@ -15,11 +15,17 @@
   <span class="faint">first {{rel .Issue.FirstSeenAt}} · last {{rel .Issue.LastSeenAt}}</span>
 </p>
 <div class="actions">
+  {{if eq .Issue.Type "error"}}
   {{if .Issue.Resolved}}
   <span class="badge ok">resolved</span>
-  <form class="inline" method="post" action="/issues/{{.Issue.ID}}/reopen"><button>Reopen</button></form>
+  <form class="inline" method="post" action="/issues/{{.Issue.ID}}/reopen"><input type="hidden" name="from" value="{{.BackPath}}"><button>Reopen</button></form>
   {{else}}
-  <form class="inline" method="post" action="/issues/{{.Issue.ID}}/resolve"><button>Resolve</button></form>
+  <form class="inline" method="post" action="/issues/{{.Issue.ID}}/resolve"><input type="hidden" name="from" value="{{.BackPath}}"><button>Resolve</button></form>
+  {{end}}
+  {{else}}
+  {{/* A log group is an event stream: no resolve state exists, so the button
+       would be a no-op that also throws the reader onto the wrong tab. */}}
+  <span class="faint">Read-only: a {{.Issue.Type}} row is an event stream, not a defect. Silence it at the producer — mute the channel or raise the level.</span>
   {{end}}
   {{if eq .Issue.Type "log"}}<a class="faint" href="{{tl .Toolbar "/errors" "tab" "logs" "channel" .Issue.Channel}}">Other logs on this channel →</a>{{end}}
 </div>

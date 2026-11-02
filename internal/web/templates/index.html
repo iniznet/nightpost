@@ -1,22 +1,18 @@
 {{define "title"}}Errors — nightpost{{end}}
 {{define "subtabs"}}{{template "tabsErrors" .}}{{end}}
-{{define "heading"}}Issues{{end}}
+{{define "heading"}}Exceptions{{end}}
 {{define "content"}}
-<p class="faint">Error-class failures only — the log stream has its own tab. Every issue is reachable from its fingerprint, and a release marker scopes the list to new-since-deploy.</p>
+<p class="faint">Exception-class failures only, ranked by pain. The split follows the <b>producer</b>, not the severity: a <span class="mono">warning</span>-level exception is a defect and lands here, while a <span class="mono">warning</span>-level log record is an event and lands on the Logs tab. Every row is reachable from its fingerprint, and a release marker scopes the list to new-since-deploy.</p>
 <form class="filterbar" method="get" action="{{.Path}}">
   {{template "scopehidden" .}}
   <input type="search" name="q" value="{{.Filter.Q}}" placeholder="Search titles">
-  <select name="type">
-    <option value=""{{if eq .Filter.Type ""}} selected{{end}}>type: all</option>
-    <option value="error"{{if eq .Filter.Type "error"}} selected{{end}}>errors</option>
-    <option value="log"{{if eq .Filter.Type "log"}} selected{{end}}>logs</option>
-  </select>
+  {{/* No type mixer: log rows belong to the Logs tab. An old ?type=log deep
+       link is still honoured, and the notice below says so. */}}
+  {{if and .Filter.Type (ne .Filter.Type "error")}}<input type="hidden" name="type" value="{{.Filter.Type}}">{{end}}
   <select name="level">
+    {{$lvl := .Filter.Level}}
     <option value="">level: all</option>
-    <option value="error"{{if eq .Filter.Level "error"}} selected{{end}}>error</option>
-    <option value="warning"{{if eq .Filter.Level "warning"}} selected{{end}}>warning</option>
-    <option value="info"{{if eq .Filter.Level "info"}} selected{{end}}>info</option>
-    <option value="debug"{{if eq .Filter.Level "debug"}} selected{{end}}>debug</option>
+    {{range .Levels}}<option value="{{.Level}}"{{if eq .Level $lvl}} selected{{end}}>{{.Level}}{{if .Count}} ({{.Count}}){{end}}</option>{{end}}
   </select>
   <select name="new_since">
     <option value="">deploy scope: all</option>
@@ -29,6 +25,9 @@
   </select>
   <button class="primary">Apply filters</button>
 </form>
+{{if and .Filter.Type (ne .Filter.Type "error")}}
+<p class="faint">A legacy link asked for <b>{{.Filter.Type}}</b> rows, so this list is showing them. <a href="{{tl .Toolbar .Path}}">Back to exceptions</a>.</p>
+{{end}}
 <div class="filterbar">
   <span class="label">sort</span>
   <a href="{{tl .Toolbar .Path "type" .Filter.Type "level" .Filter.Level "status" .Filter.Status "q" .Filter.Q "new_since" .Filter.NewSince "sort" "pain"}}" class="pill{{if eq .Filter.Sort "pain"}} on{{end}}">pain (count)</a>

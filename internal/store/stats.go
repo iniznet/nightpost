@@ -100,9 +100,17 @@ func (s *Store) IssueTotal(project string) (int64, error) {
 
 // LogLevels aggregates issue counts per level for the log stream filter.
 func (s *Store) LogLevels(project string) ([]LevelCount, error) {
+	return s.Levels(project, "log")
+}
+
+// Levels aggregates issue counts per level for one row type, feeding the level
+// facet on both tabs. It takes the type because the two tabs show different
+// rows: an exception-only level such as fatal must not be offered on Logs, and
+// a log-only level must not be offered on Exceptions.
+func (s *Store) Levels(project, typ string) ([]LevelCount, error) {
 	rows, err := s.rdb.Query(`SELECT COALESCE(level, 'info'), COUNT(*) FROM issues
-		WHERE type = 'log' AND archived_at = 0 AND (? = '' OR project_key = ?)
-		GROUP BY level ORDER BY COUNT(*) DESC`, project, project)
+		WHERE (? = '' OR type = ?) AND archived_at = 0 AND (? = '' OR project_key = ?)
+		GROUP BY level ORDER BY COUNT(*) DESC`, typ, typ, project, project)
 	if err != nil {
 		return nil, err
 	}

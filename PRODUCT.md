@@ -36,11 +36,20 @@ words under the page title ("backend · 24h · production"), and every filter fo
 carries the full scope through one shared partial, so a page filter can never
 widen or narrow the tenant scope silently.
 **Errors** — `/errors`
-- *Issues* (default): error-class defect list, filters, trend sparklines,
-  keyset pagination, per-fingerprint detail at `/issues/{id}`. Log-type
-  pseudo-issues are folded out of this stream.
+- *Exceptions* (default): exception-class defect list, filters, trend
+  sparklines, keyset pagination, per-fingerprint detail at `/issues/{id}`.
+  Only an exception carries a resolve state; log-type pseudo-issues stay out of
+  this stream.
 - *Logs*: the Monolog stream (type=log) with level / channel / env filters and
-  a 15 s refresh, cross-linked with Issues.
+  a 15 s refresh, cross-linked with Exceptions. Read-only: a log group is an
+  event stream, so it renders no Resolve control and the resolve endpoint
+  refuses it.
+
+The split follows the **producer**, not the severity. An exception at `warning`
+is a defect — ranked by pain, resolvable. A log record at `warning` is an event
+— chronological, read-only. Both tabs build their level facet from the rows they
+can actually show, so a producer's own vocabulary (`notice`, `critical`,
+`deprecated`) is never truncated to a hardcoded set.
 **Performance** — `/performance`
 - *Endpoints* (default): request profiles aggregated by route (count · p50 ·
   p95 · total · avg · max), each route drilling into the raw samples behind it
