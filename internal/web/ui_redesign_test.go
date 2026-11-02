@@ -112,7 +112,9 @@ func TestShellHasFourSectionsWithAriaCurrent(t *testing.T) {
 	if !strings.Contains(body, "aria-current=\"page\">Errors</a>") {
 		t.Error("active section is not announced with aria-current")
 	}
-	if !strings.Contains(body, "aria-current=\"page\">Issues</a>") {
+	// The exceptions tab was labelled "Issues" until #526 renamed it: the word
+	// hid what the tab excludes (log rows).
+	if !strings.Contains(body, "aria-current=\"page\">Exceptions</a>") {
 		t.Error("active tab is not announced with aria-current")
 	}
 }
