@@ -1,12 +1,13 @@
 {{define "title"}}Settings — nightpost{{end}}
+{{define "subtabs"}}{{template "tabsConfigure" .}}{{end}}
+{{define "heading"}}Settings{{end}}
 {{define "content"}}
-<h1>Settings</h1>
 {{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}
 {{if .Error}}<p class="form-error">{{.Error}}</p>{{end}}
 <p class="faint">Settings live in the database. The process flags are <b>import-once defaults</b>: a value saved here wins from now on, including across restarts and redeploys. <span class="badge ok">live</span> is re-read by the running process; <span class="badge warn">restart</span> needs a restart to take effect.</p>
 <form method="post" action="/settings/save">
 <table>
-<thead><tr><th>Setting</th><th>Value</th><th>Applied</th><th>Notes</th></tr></thead>
+<thead><tr><th scope="col">Setting</th><th scope="col">Value</th><th scope="col">Applied</th><th scope="col">Notes</th></tr></thead>
 <tbody>
 {{range .Rows}}
 <tr>

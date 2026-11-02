@@ -1,0 +1,10 @@
+{{define "title"}}{{if eq .Status 404}}Not found{{else if ge .Status 500}}Something broke{{else}}Request refused{{end}} — nightpost{{end}}
+{{define "heading"}}{{if eq .Status 404}}Not found{{else if ge .Status 500}}Something broke{{else}}Request refused{{end}}{{end}}
+{{define "content"}}
+<div class="flash warn" role="alert"><b>{{.Status}}</b> — {{.Message}}</div>
+<p class="faint">This page could not be rendered. Nothing was changed.</p>
+<p class="actions">
+  <a class="btn" href="{{tl .Toolbar "/"}}">Back to Now</a>
+  <a class="btn" href="{{tl .Toolbar .Path}}">Retry this page</a>
+</p>
+{{end}}

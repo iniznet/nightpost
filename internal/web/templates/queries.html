@@ -1,14 +1,15 @@
 {{define "title"}}Slow queries — nightpost{{end}}
+{{define "subtabs"}}{{template "tabsPerf" .}}{{end}}
+{{define "heading"}}Slow queries{{end}}
 {{define "content"}}
-<h1>Slow queries</h1>
 <p class="faint">Statement shapes ranked by total time over the window — literals, ids and numbers normalized, so parameterized variants group together.</p>
 {{if .Rows}}
 <table>
-<thead><tr><th>SQL</th><th>Conn</th><th>Total</th><th>Count</th><th>Avg</th><th>Max</th><th>Last seen</th></tr></thead>
+<thead><tr><th scope="col">SQL</th><th scope="col">Conn</th><th scope="col">Total</th><th scope="col">Count</th><th scope="col">Avg</th><th scope="col">Max</th><th scope="col">Last seen</th></tr></thead>
 <tbody>
 {{range .Rows}}
 <tr>
-  <td class="mono sql-cell" title="{{.SQL}}">{{.SQL}}</td>
+  <td class="mono sql-cell" title="{{.SQL}}">{{trunc .SQL 120}}</td>
   <td class="mono dim">{{or .Connection "—"}}</td>
   <td class="num"><span class="inline-bar"><span class="fill hot-fill" style="width:{{pct .TotalMs $.MaxTotal}}%"></span></span><span class="mono">{{ms .TotalMs}}</span></td>
   <td class="num">{{.Count}}</td>
@@ -19,5 +20,5 @@
 {{end}}
 </tbody>
 </table>
-{{else}}<p class="empty">No slow queries captured yet — enable MONITOR_SLOW_QUERY_MS on the backend.</p>{{end}}
+{{else}}<p class="empty">No slow queries captured yet. <a href="{{tl .Toolbar "/performance"}}">Check endpoint latency instead</a> — slow statements need <code class="mono">MONITOR_SLOW_QUERY_MS</code> on the producer.</p>{{end}}
 {{end}}

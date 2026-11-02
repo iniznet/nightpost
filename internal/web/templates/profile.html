@@ -1,7 +1,8 @@
 {{define "title"}}{{.Profile.Name}} — nightpost{{end}}
+{{define "subtabs"}}{{template "tabsPerf" .}}{{end}}
+{{define "heading"}}{{.Profile.Name}}{{end}}
 {{define "content"}}
-<p><a href="/profiles?project={{.Profile.ProjectKey}}">← Profiles</a></p>
-<h1>{{.Profile.Name}}</h1>
+<p class="crumbs"><a href="{{tl .Toolbar "/performance" "project" .Profile.ProjectKey}}">← Endpoints</a><span class="faint">·</span><span class="faint">{{.Profile.ProjectKey}}</span></p>
 <p class="meta">
   <span class="badge">{{.Profile.Type}}</span>
   {{if .Profile.Environment}}<span class="badge">{{.Profile.Environment}}</span>{{end}}

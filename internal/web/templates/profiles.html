@@ -1,13 +1,7 @@
 {{define "title"}}Endpoints — nightpost{{end}}
-{{define "subtabs"}}
-<div class="tabs">
-  <a href="{{tl .Toolbar "/performance"}}" class="tab{{if or (eq .Page "performance") (eq .Page "profiles")}} on{{end}}">Endpoints</a>
-  <a href="{{tl .Toolbar "/performance" "tab" "traces"}}" class="tab{{if eq .Page "traces"}} on{{end}}">Traces</a>
-  <a href="{{tl .Toolbar "/performance" "tab" "hotspots"}}" class="tab{{if eq .Page "slowest"}} on{{end}}">Hotspots</a>
-</div>
-{{end}}
+{{define "subtabs"}}{{template "tabsPerf" .}}{{end}}
+{{define "heading"}}Endpoints{{end}}
 {{define "content"}}
-<h1>Endpoints</h1>
 <div class="filterbar">
   <span class="label">type</span>
   <a href="{{tl .Toolbar .Path "type" "" "view" .View "q" .Q}}" class="pill{{if eq .TypeF ""}} on{{end}}">all</a>
@@ -26,7 +20,7 @@
 </div>
 {{if .Routes}}
 <table>
-<thead><tr><th>Route</th><th>Count</th><th>p50</th><th>p95</th><th>Total</th><th>Avg</th><th>Max</th><th>Last seen</th></tr></thead>
+<thead><tr><th scope="col">Route</th><th scope="col">Count</th><th scope="col">p50</th><th scope="col">p95</th><th scope="col">Total</th><th scope="col">Avg</th><th scope="col">Max</th><th scope="col">Last seen</th></tr></thead>
 <tbody>
 {{range .Routes}}
 <tr>
@@ -45,9 +39,7 @@
 <p class="faint">Aggregates cover the most recent 20,000 request samples inside the selected range.</p>
 {{else}}
 <form class="filterbar" method="get" action="{{.Path}}">
-  <input type="hidden" name="project" value="{{.Toolbar.Project}}">
-  <input type="hidden" name="range" value="{{.Toolbar.Range}}">
-  <input type="hidden" name="env" value="{{.Toolbar.Env}}">
+  {{template "scopehidden" .}}
   {{if .TypeF}}<input type="hidden" name="type" value="{{.TypeF}}">{{end}}
   <input type="hidden" name="view" value="raw">
   <input type="search" name="q" value="{{.Q}}" placeholder="Search route names">
@@ -55,7 +47,7 @@
 </form>
 {{if .Profiles}}
 <table>
-<thead><tr><th>Name</th><th>Type</th><th>Project</th><th>Duration</th><th>Env</th><th>Spans</th><th>Hotspots</th><th>Recorded</th></tr></thead>
+<thead><tr><th scope="col">Name</th><th scope="col">Type</th><th scope="col">Project</th><th scope="col">Duration</th><th scope="col">Env</th><th scope="col">Spans</th><th scope="col">Hotspots</th><th scope="col">Recorded</th></tr></thead>
 <tbody>
 {{range .Profiles}}
 <tr>
@@ -71,6 +63,6 @@
 {{end}}
 </tbody>
 </table>
-{{else}}<p class="empty">No profiles recorded yet.</p>{{end}}
+{{else}}<p class="empty">No profiles recorded yet. <a href="{{tl .Toolbar "/keys"}}">Copy the project key</a>, then POST <code class="mono">/ingest/{project}/profile</code> from a producer.</p>{{end}}
 {{end}}
 {{end}}

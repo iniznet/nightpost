@@ -12,6 +12,7 @@ import (
 // type='query' issue, keeping the defect list the single history surface.
 
 type QueryAgg struct {
+	ProjectKey  string
 	Fingerprint string
 	SQL         string
 	Connection  string
@@ -93,7 +94,7 @@ func (s *Store) QueryLeaderboard(project string, hours, limit int) ([]QueryAgg, 
 		limit = 50
 	}
 	cutoff := time.Now().Add(-time.Duration(hours) * time.Hour).Unix()
-	rows, err := s.rdb.Query(`SELECT fingerprint, sql, connection, count, total_ms, max_ms, last_seen_at
+	rows, err := s.rdb.Query(`SELECT project_key, fingerprint, sql, connection, count, total_ms, max_ms, last_seen_at
 		FROM query_stats
 		WHERE (? = '' OR project_key = ?) AND last_seen_at >= ?
 		ORDER BY total_ms DESC LIMIT ?`, project, project, cutoff, limit)
@@ -105,7 +106,7 @@ func (s *Store) QueryLeaderboard(project string, hours, limit int) ([]QueryAgg, 
 	for rows.Next() {
 		var q QueryAgg
 		var last int64
-		if err := rows.Scan(&q.Fingerprint, &q.SQL, &q.Connection, &q.Count, &q.TotalMs, &q.MaxMs, &last); err != nil {
+		if err := rows.Scan(&q.ProjectKey, &q.Fingerprint, &q.SQL, &q.Connection, &q.Count, &q.TotalMs, &q.MaxMs, &last); err != nil {
 			return nil, err
 		}
 		q.LastSeen = time.Unix(last, 0)

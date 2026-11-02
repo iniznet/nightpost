@@ -1,10 +1,11 @@
 {{define "title"}}Organizations — nightpost{{end}}
+{{define "subtabs"}}{{template "tabsConfigure" .}}{{end}}
+{{define "heading"}}Organisations{{end}}
 {{define "content"}}
-<h1>Organizations</h1>
 <p class="faint">An org groups projects. Assignment is additive: a project keeps its key and its producer configuration — only the dashboard projection changes. Every project not assigned here belongs to <b>Default</b>.</p>
 {{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}
 {{if .Error}}<p class="form-error">{{.Error}}</p>{{end}}
-<form class="filterbar" method="post" action="/orgs/create">
+<form class="filterbar" method="post" action="/orgs/create" id="new-org">
   <span class="label">new org</span>
   <input name="name" placeholder="Name" required>
   <input name="slug" placeholder="slug (optional)">
@@ -13,7 +14,7 @@
 <h2>Orgs</h2>
 {{if .Orgs}}
 <table>
-<thead><tr><th>Name</th><th>Slug</th><th>Projects</th><th>Members</th><th>Created</th></tr></thead>
+<thead><tr><th scope="col">Name</th><th scope="col">Slug</th><th scope="col">Projects</th><th scope="col">Members</th><th scope="col">Created</th></tr></thead>
 <tbody>
 {{range .Orgs}}
 <tr>
@@ -26,11 +27,11 @@
 {{end}}
 </tbody>
 </table>
-{{else}}<p class="empty">No orgs yet.</p>{{end}}
+{{else}}<p class="empty">No orgs yet. <a href="#new-org">Create the first one</a>.</p>{{end}}
 <h2>Project assignment</h2>
 {{if .ProjectRows}}
 <table>
-<thead><tr><th>Project</th><th>Ingest key</th><th>Org</th><th></th></tr></thead>
+<thead><tr><th scope="col">Project</th><th scope="col">Ingest key</th><th scope="col">Org</th><th scope="col"></th></tr></thead>
 <tbody>
 {{range .ProjectRows}}
 <tr>

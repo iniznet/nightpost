@@ -68,6 +68,57 @@ func (p Page) nav() string {
 	return ""
 }
 
+// section is the one top-level destination a page belongs to. Four sections,
+// not eight peers: data surfaces and config surfaces stop competing for the
+// same row, and Queries/Jobs read as Performance detail instead of siblings.
+func (p Page) section() string {
+	switch p {
+	case PageDashboard:
+		return "now"
+	case PageErrors, PageIssues, PageLogs:
+		return "errors"
+	case PagePerformance, PageProfiles, PageSlowest, PageTraces, PageTrace, PageQueries, PageJobs:
+		return "performance"
+	case PageKeys, PageOrgs, PageSettings:
+		return "configure"
+	}
+	return ""
+}
+
+// pageForPath resolves the page identity from a request path, so a failure can
+// render inside the shell it interrupted.
+func pageForPath(p string) Page {
+	switch {
+	case p == "/":
+		return PageDashboard
+	case strings.HasPrefix(p, "/errors"):
+		return PageErrors
+	case strings.HasPrefix(p, "/issues"):
+		return PageIssues
+	case strings.HasPrefix(p, "/logs"):
+		return PageLogs
+	case strings.HasPrefix(p, "/performance"):
+		return PagePerformance
+	case strings.HasPrefix(p, "/profiles"):
+		return PageProfiles
+	case strings.HasPrefix(p, "/slowest"):
+		return PageSlowest
+	case strings.HasPrefix(p, "/traces"):
+		return PageTraces
+	case strings.HasPrefix(p, "/queries"):
+		return PageQueries
+	case strings.HasPrefix(p, "/jobs"):
+		return PageJobs
+	case strings.HasPrefix(p, "/keys"):
+		return PageKeys
+	case strings.HasPrefix(p, "/orgs"):
+		return PageOrgs
+	case strings.HasPrefix(p, "/settings"):
+		return PageSettings
+	}
+	return ""
+}
+
 type issueFilter struct {
 	Type, Level, Env, Channel, Status, Q string
 	NewSince                             string
@@ -395,6 +446,99 @@ func mustLayout(page string) *template.Template {
 	return template.Must(template.New("layout").Funcs(funcMap).ParseFS(templateFS, "templates/base.html", "templates/"+page))
 }
 
+// errorLayout renders a page-level failure inside the shell: the reader who
+// hits a broken page still needs the nav, the scope bar and a way back.
+var errorLayout = mustLayout("error.html")
+
+// fail answers a page failure inside the layout, keeping the status code.
+func (s *server) fail(w http.ResponseWriter, r *http.Request, err error) {
+	s.failStatus(w, r, http.StatusInternalServerError, err.Error())
+}
+
+func (s *server) failStatus(w http.ResponseWriter, r *http.Request, code int, msg string) {
+	t := parseToolbar(r.URL.Query())
+	page := pageForPath(r.URL.Path)
+	data := s.baseData(r, t, page)
+	data["Status"] = code
+	data["Message"] = msg
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(code)
+	if err := errorLayout.ExecuteTemplate(w, "layout", data); err != nil {
+		log.Printf("render error page: %v", err)
+	}
+}
+
+// scopeLine is the one place the current scope is spelled out in words, so a
+// reader never has to reconstruct it from four controls.
+func scopeLine(t toolbar, orgs []store.Org, section string) string {
+	parts := make([]string, 0, 4)
+	if section == "configure" {
+		return ""
+	}
+	if t.Org != "" {
+		name := t.Org
+		for _, o := range orgs {
+			if o.Slug == t.Org {
+				name = o.Name
+				break
+			}
+		}
+		parts = append(parts, name)
+	}
+	if t.Project == "" {
+		parts = append(parts, "all projects")
+	} else {
+		parts = append(parts, t.Project)
+	}
+	parts = append(parts, t.Range)
+	if t.Env == "" {
+		parts = append(parts, "all envs")
+	} else {
+		parts = append(parts, t.Env)
+	}
+	return strings.Join(parts, " · ")
+}
+
+// safeBack accepts only a root-relative path, never an absolute URL.
+func safeBack(v string) string {
+	if v == "" || !strings.HasPrefix(v, "/") || strings.HasPrefix(v, "//") {
+		return ""
+	}
+	if strings.IndexByte(v, 92) >= 0 || strings.IndexByte(v, 13) >= 0 || strings.IndexByte(v, 10) >= 0 {
+		return ""
+	}
+	return v
+}
+
+// topDefects is the landing page's focal block: the defects that hurt most
+// right now, across every project in scope. The all-projects dashboard used to
+// render cards and aggregate tables only, so the default page could not name a
+// single defect.
+func (s *server) topDefects(t toolbar, scope map[string]bool, hours, limit int) ([]store.Issue, map[int64][]int64, error) {
+	q := store.IssueQuery{Project: t.Project, Type: "error", Status: "open", Sort: "pain", Limit: limit}
+	if scope != nil {
+		q.Limit = limit * 10
+	}
+	issues, err := s.st.Issues(q)
+	if err != nil {
+		return nil, nil, err
+	}
+	if scope != nil {
+		kept := make([]store.Issue, 0, limit)
+		for _, is := range issues {
+			if scope[is.ProjectKey] {
+				kept = append(kept, is)
+			}
+			if len(kept) >= limit {
+				break
+			}
+		}
+		issues = kept
+	}
+	spark, _ := s.st.IssueSparklines(t.Project, hours)
+	return issues, spark, nil
+}
+
 // Option configures the page server.
 type Option func(*server)
 
@@ -655,17 +799,23 @@ func (s *server) baseData(r *http.Request, t toolbar, page Page) map[string]any 
 	if err != nil {
 		log.Printf("orgs: %v", err)
 	}
+	section := page.section()
 	data := map[string]any{
-		"Projects": projects,
-		"Orgs":     orgs,
-		"Project":  t.Project,
-		"Page":     page,
-		"Nav":      page.nav(),
-		"Toolbar":  t,
-		"Ranges":   rangeSpecs,
-		"Envs":     envs,
-		"Path":     r.URL.Path,
-		"Tab":      r.URL.Query().Get("tab"),
+		"Projects":  projects,
+		"Orgs":      orgs,
+		"Project":   t.Project,
+		"Page":      page,
+		"Nav":       page.nav(),
+		"Section":   section,
+		"Toolbar":   t,
+		"Ranges":    rangeSpecs,
+		"Envs":      envs,
+		"Path":      r.URL.Path,
+		"Tab":       r.URL.Query().Get("tab"),
+		"Self":      r.URL.RequestURI(),
+		"Scope":     section != "" && section != "configure",
+		"ScopeBar":  section != "",
+		"ScopeLine": scopeLine(t, orgs, section),
 	}
 	if s.health.configured() {
 		data["Health"] = s.health.Snapshot()
@@ -784,7 +934,7 @@ func (s *server) handleIssues(w http.ResponseWriter, r *http.Request) {
 	}
 	issues, err := s.st.Issues(query)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.fail(w, r, err)
 		return
 	}
 	spark, _ := s.st.IssueSparklines(t.Project, t.Hours())
@@ -828,25 +978,29 @@ func (s *server) handleIssues(w http.ResponseWriter, r *http.Request) {
 func (s *server) handleIssueDetail(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
-		http.Error(w, "bad id", http.StatusBadRequest)
+		s.failStatus(w, r, http.StatusBadRequest, "bad id")
 		return
 	}
 	issue, err := s.st.Issue(id)
 	if err != nil {
-		http.Error(w, "not found", http.StatusNotFound)
+		s.failStatus(w, r, http.StatusNotFound, "not found")
 		return
 	}
 	occurrences, err := s.st.Occurrences(id, 20)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.fail(w, r, err)
 		return
 	}
 	t := parseToolbar(r.URL.Query())
-	// The detail link targets the section the row came from (Errors); the
-	// legacy path is preserved so bookmarks keep working.
+	// The detail link carries the list it came from (filters and all), so the
+	// way back lands where the reader was. A malformed or foreign value falls
+	// back to the section root rather than becoming an open redirect.
 	backPath := "/errors"
 	if r.URL.Query().Get("from") == "logs" {
 		backPath = "/errors"
+	}
+	if from := safeBack(r.URL.Query().Get("from")); from != "" {
+		backPath = from
 	}
 	data := s.baseData(r, t, PageErrors)
 	data["Issue"] = issue
@@ -880,7 +1034,7 @@ func (s *server) handleLogs(w http.ResponseWriter, r *http.Request) {
 		Limit:    50,
 	})
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.fail(w, r, err)
 		return
 	}
 	levels, _ := s.st.LogLevels(t.Project)
@@ -938,7 +1092,7 @@ func (s *server) handleProfiles(w http.ResponseWriter, r *http.Request) {
 		// accumulates wall-clock time.
 		routes, err := s.st.ProfileRouteStats(t.Project, typeFilter, t.Hours(), 50)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.fail(w, r, err)
 			return
 		}
 		data["Routes"] = routes
@@ -957,7 +1111,7 @@ func (s *server) handleProfiles(w http.ResponseWriter, r *http.Request) {
 	}
 	profiles, err := s.st.ProfilesFiltered(t.Project, typeFilter, search, 50)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.fail(w, r, err)
 		return
 	}
 	var maxDur float64
@@ -976,12 +1130,12 @@ func (s *server) handleProfiles(w http.ResponseWriter, r *http.Request) {
 func (s *server) handleProfileDetail(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
-		http.Error(w, "bad id", http.StatusBadRequest)
+		s.failStatus(w, r, http.StatusBadRequest, "bad id")
 		return
 	}
 	profile, err := s.st.Profile(id)
 	if err != nil {
-		http.Error(w, "not found", http.StatusNotFound)
+		s.failStatus(w, r, http.StatusNotFound, "not found")
 		return
 	}
 	var maxSelf float64
@@ -1007,7 +1161,7 @@ func (s *server) handleTraces(w http.ResponseWriter, r *http.Request) {
 	t := parseToolbar(r.URL.Query())
 	rows, err := s.st.Traces(t.Project, t.Hours(), 50)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.fail(w, r, err)
 		return
 	}
 	data := s.baseData(r, t, PageTraces)
@@ -1022,11 +1176,11 @@ func (s *server) handleTraceDetail(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	legs, err := s.st.ProfilesByTrace(id, 20)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.fail(w, r, err)
 		return
 	}
 	if len(legs) == 0 {
-		http.Error(w, "not found", http.StatusNotFound)
+		s.failStatus(w, r, http.StatusNotFound, "not found")
 		return
 	}
 	t := parseToolbar(r.URL.Query())
@@ -1053,7 +1207,7 @@ func (s *server) handleSlowest(w http.ResponseWriter, r *http.Request) {
 	}
 	all, err := s.st.SlowestCode(t.Project, 500)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.fail(w, r, err)
 		return
 	}
 	filtered := make([]store.HotspotAgg, 0, len(all))
@@ -1123,7 +1277,7 @@ func (s *server) handleQueries(w http.ResponseWriter, r *http.Request) {
 	data := s.baseData(r, t, PageQueries)
 	aggs, err := s.st.QueryLeaderboard(t.Project, t.Hours(), 50)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.fail(w, r, err)
 		return
 	}
 	type QueryRow struct {
@@ -1158,7 +1312,7 @@ func (s *server) handleJobs(w http.ResponseWriter, r *http.Request) {
 	data := s.baseData(r, t, PageJobs)
 	aggs, err := s.st.JobLeaderboard(t.Project, t.Hours(), 200)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.fail(w, r, err)
 		return
 	}
 	data["Rows"] = aggs
@@ -1179,17 +1333,17 @@ func (s *server) renderOrgs(w http.ResponseWriter, r *http.Request, extra map[st
 	data := s.baseData(r, t, PageOrgs)
 	orgs, err := s.st.ListOrgs()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.fail(w, r, err)
 		return
 	}
 	projects, err := s.st.ListProjects()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.fail(w, r, err)
 		return
 	}
 	assign, err := s.st.ProjectOrgMap()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.fail(w, r, err)
 		return
 	}
 	data["Orgs"] = orgs
@@ -1261,7 +1415,7 @@ func (s *server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 	data := s.baseData(r, t, PageDashboard)
 	summaries, err := s.st.DashboardSummaries(hours)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.fail(w, r, err)
 		return
 	}
 	scope := s.projectScope(t)
@@ -1275,6 +1429,13 @@ func (s *server) handleDashboard(w http.ResponseWriter, r *http.Request) {
 			rows = append(rows, ProjectRow{Summary: sm.Summary, Trend: sm.Trend})
 			cards = append(cards, s.projectCard(sm, hours, t.Env))
 		}
+		recent, spark, derr := s.topDefects(t, scope, hours, 6)
+		if derr != nil {
+			s.fail(w, r, derr)
+			return
+		}
+		data["Recent"] = recent
+		data["Spark"] = spark
 		data["All"] = true
 		data["Rows"] = rows
 		data["Cards"] = cards
@@ -1352,7 +1513,7 @@ func (s *server) renderKeys(w http.ResponseWriter, r *http.Request, extra map[st
 	data := s.baseData(r, t, PageKeys)
 	projects, err := s.st.ListProjects()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.fail(w, r, err)
 		return
 	}
 	if scope := s.projectScope(t); scope != nil {
@@ -1389,7 +1550,7 @@ func (s *server) handleKeyRotate(w http.ResponseWriter, r *http.Request) {
 	}
 	secret, err := s.st.RotateIngestKey(project)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.fail(w, r, err)
 		return
 	}
 	if s.gate != nil {
@@ -1415,7 +1576,7 @@ func (s *server) handleKeyRevoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.st.RevokeIngestKey(project); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.fail(w, r, err)
 		return
 	}
 	if s.gate != nil {
@@ -1446,11 +1607,11 @@ func (s *server) handleKeyOrigin(w http.ResponseWriter, r *http.Request) {
 	}
 	normalized, err := store.NormalizeCORSOrigins(r.FormValue("cors_origin"))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.failStatus(w, r, http.StatusBadRequest, err.Error())
 		return
 	}
 	if err := s.st.SetProjectCORSOrigin(project, normalized); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.fail(w, r, err)
 		return
 	}
 	if s.cors != nil {
@@ -1715,15 +1876,15 @@ func (s *server) resolveHandler(resolved bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 		if err != nil {
-			http.Error(w, "bad id", http.StatusBadRequest)
+			s.failStatus(w, r, http.StatusBadRequest, "bad id")
 			return
 		}
 		if _, err := s.st.Issue(id); err != nil {
-			http.Error(w, "not found", http.StatusNotFound)
+			s.failStatus(w, r, http.StatusNotFound, "not found")
 			return
 		}
 		if err := s.st.SetResolved(id, resolved); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.fail(w, r, err)
 			return
 		}
 		t := parseToolbar(r.URL.Query())

@@ -26,7 +26,7 @@ func TestSettingsPageRendersAndSaves(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /settings status %d", resp.StatusCode)
 	}
-	for _, want := range []string{`name="retention_days"`, `value="30"`, "import-once", "<main class=\"wrap\">"} {
+	for _, want := range []string{`name="retention_days"`, `value="30"`, "import-once", "<main class=\"wrap\" id=\"main\">"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("settings page missing %q", want)
 		}

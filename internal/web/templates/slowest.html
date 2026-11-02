@@ -1,13 +1,7 @@
 {{define "title"}}Hotspots — nightpost{{end}}
-{{define "subtabs"}}
-<div class="tabs">
-  <a href="{{tl .Toolbar "/performance"}}" class="tab{{if or (eq .Page "performance") (eq .Page "profiles")}} on{{end}}">Endpoints</a>
-  <a href="{{tl .Toolbar "/performance" "tab" "traces"}}" class="tab{{if eq .Page "traces"}} on{{end}}">Traces</a>
-  <a href="{{tl .Toolbar "/performance" "tab" "hotspots"}}" class="tab{{if eq .Page "slowest"}} on{{end}}">Hotspots</a>
-</div>
-{{end}}
+{{define "subtabs"}}{{template "tabsPerf" .}}{{end}}
+{{define "heading"}}Hotspots{{end}}
 {{define "content"}}
-<h1>Hotspots</h1>
 <p class="faint">Self-time leaderboard aggregated across the most recent callgraph profiles. Proportion is self time relative to the worst <em>shown</em> function; the app/framework scope isolates your own code from vendor frames.</p>
 <div class="filterbar">
   <span class="label">scope</span>
@@ -18,7 +12,7 @@
 </div>
 {{if .Rows}}
 <table>
-<thead><tr><th>Function</th><th>File</th><th>Hottest sample</th><th>Total self</th><th>Avg</th><th>Samples</th><th>Last seen</th></tr></thead>
+<thead><tr><th scope="col">Function</th><th scope="col">File</th><th scope="col">Hottest sample</th><th scope="col">Total self</th><th scope="col">Avg</th><th scope="col">Samples</th><th scope="col">Last seen</th></tr></thead>
 <tbody>
 {{range .Rows}}
 <tr>
@@ -33,7 +27,7 @@
 {{end}}
 </tbody>
 </table>
-{{else}}<p class="empty">No callgraph profiles recorded yet for this scope.</p>{{end}}
+{{else}}<p class="empty">No callgraph profiles for this scope. <a href="{{tl .Toolbar .Path "scope" "" "page" ""}}">Drop the scope filter</a> or send a <code class="mono">callgraph</code> profile.</p>{{end}}
 {{if or .PrevURL .NextURL}}
 <p class="pager">
   {{if .PrevURL}}<a href="{{.PrevURL}}">← Newer</a>{{end}}

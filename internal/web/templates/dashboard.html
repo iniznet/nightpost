@@ -1,28 +1,42 @@
-{{define "title"}}Dashboard — nightpost{{end}}
+{{define "title"}}Now — nightpost{{end}}
+{{define "heading"}}{{if .All}}Now{{else}}{{.Summary.Project}}{{end}}{{end}}
 {{define "content"}}
 {{if .All}}
-<h1>Projects</h1>
 {{if .Cards}}
-<div class="cards">
+<div class="strip" aria-label="Projects in scope">
 {{range .Cards}}
-<div class="card">
-  <h3><a href="{{tl $.Toolbar "/" "project" .Project}}">{{.Project}}</a></h3>
-  <div class="row"><span class="k">open issues</span><span class="num">{{.OpenIssues}}</span></div>
-  <div class="row"><span class="k">errors ({{$.Toolbar.Range}})</span><span class="num">{{.Errors}}</span></div>
-  <div class="row"><span class="k">new since {{if .ReleaseVersion}}{{.ReleaseVersion}}{{else}}release{{end}}</span><span class="num">{{if .ReleaseVersion}}{{.NewSinceRelease}}{{else}}—{{end}}</span></div>
-  <div class="row"><span class="k">p95 latency</span><span class="num">{{if .P95Ms}}{{ms .P95Ms}} <span class="{{if gt .DeltaPct 0.0}}bad{{else}}good{{end}}">{{delta .DeltaPct}}</span>{{else}}—{{end}}</span></div>
-  <div>{{if .Trend}}<svg class="spark" width="96" height="24" viewBox="0 0 96 24" aria-label="errors per hour"><polyline class="spark-line" points="{{spark .Trend}}"/></svg>{{else}}<span class="faint">no errors</span>{{end}}</div>
-  <div class="links">
-    <a href="{{tl $.Toolbar "/errors" "project" .Project}}">Errors →</a>
-    <a href="{{tl $.Toolbar "/performance" "project" .Project}}">Performance →</a>
-    <a href="{{tl $.Toolbar "/performance" "project" .Project "tab" "hotspots"}}">Hotspots →</a>
-  </div>
-</div>
+  <a href="{{tl $.Toolbar "/" "project" .Project}}"><span class="mono">{{.Project}}</span><b>{{.OpenIssues}}</b><span class="faint">open</span><b>{{.Errors}}</b><span class="faint">errors</span>{{if .P95Ms}}<b>{{ms .P95Ms}}</b><span class="faint">p95</span>{{end}}</a>
 {{end}}
 </div>
-{{else}}<p class="empty">No data yet — point a sender at the monitor and it will appear here.</p>{{end}}
+{{end}}
+
+{{/* the focal block: the product's promise is "name the top defect in 10 seconds" */}}
+{{if .Recent}}
+<section class="rank" aria-labelledby="rank-head">
+  <div class="rank-head">
+    <h2 id="rank-head">Top defects right now</h2>
+    <span class="faint">ranked by pain · count desc · {{.Toolbar.Range}}</span>
+  </div>
+  <table>
+  <thead><tr><th scope="col">Project</th><th scope="col">Defect</th><th scope="col">Level</th><th scope="col">Count</th><th scope="col">Trend</th><th scope="col">Last seen</th></tr></thead>
+  <tbody>
+  {{range .Recent}}
+  <tr>
+    <td class="mono dim">{{.ProjectKey}}</td>
+    <td class="t"><a href="{{tl $.Toolbar (printf "/issues/%d" .ID) "from" $.Self}}" title="{{.Title}}">{{trunc .Title 110}}</a>{{if .ExceptionClass}} <span class="faint mono">{{.ExceptionClass}}</span>{{end}}</td>
+    <td><span class="badge lvl-{{or .Level "error"}}">{{or .Level "error"}}</span></td>
+    <td class="num">{{.Count}}</td>
+    <td>{{with index $.Spark .ID}}{{if .}}{{template "sparkline" .}}{{else}}<span class="faint">—</span>{{end}}{{else}}<span class="faint">—</span>{{end}}</td>
+    <td class="dim nowrap" title="{{.LastSeenAt.Format "2006-01-02 15:04:05"}}">{{rel .LastSeenAt}}</td>
+  </tr>
+  {{end}}
+  </tbody>
+  </table>
+</section>
 {{else}}
-<h1>{{.Summary.Project}}</h1>
+<p class="empty">No open defect in this window. <a href="{{tl .Toolbar "/keys"}}">Connect a sender</a> or widen the range.</p>
+{{end}}
+{{else}}
 <div class="statstrip">
   <div class="stat"><div class="v{{if gt .Summary.Errors24 0}} err{{end}}">{{.Summary.Errors24}}</div><div class="k">errors ({{.Toolbar.Range}})</div></div>
   <div class="stat"><div class="v">{{.Summary.OpenIssues}}</div><div class="k">open issues</div></div>
@@ -30,7 +44,6 @@
   <div class="stat"><div class="v">{{.Summary.Requests24}}</div><div class="k">requests</div></div>
   <div class="stat"><div class="v">{{if .Summary.Requests24}}{{ms .Summary.P95Ms}}{{else}}—{{end}}</div><div class="k">p95 latency</div></div>
 </div>
-<div class="cards">
 <div class="card">
   <h3>{{.Card.Project}} triage</h3>
   <div class="row"><span class="k">new since {{if .Card.ReleaseVersion}}{{.Card.ReleaseVersion}}{{else}}release{{end}}</span><span class="num">{{if .Card.ReleaseVersion}}{{.Card.NewSinceRelease}}{{else}}—{{end}}</span></div>
@@ -41,69 +54,71 @@
     <a href="{{tl .Toolbar "/performance" "tab" "hotspots"}}">Hotspots →</a>
   </div>
 </div>
-</div>
-{{if .Trend}}<svg class="trend" width="100%" height="64" viewBox="0 0 96 24" preserveAspectRatio="none" aria-label="errors per hour"><polyline class="spark-line" points="{{spark .Trend}}"/></svg>
-<div class="faint">errors / hour — {{.Toolbar.Range}}</div>{{end}}
-<h2>Recent open issues</h2>
+{{if .Trend}}<svg class="trend" role="img" width="100%" height="64" viewBox="0 0 96 24" preserveAspectRatio="none" aria-label="errors per hour"><polyline class="spark-line" points="{{spark .Trend}}"/></svg>
+<p class="faint">errors / hour — {{.Toolbar.Range}}</p>{{end}}
+<h2>Recent open defects</h2>
 {{if .Recent}}
 <table>
-<thead><tr><th>Title</th><th>Level</th><th>Count</th><th>Trend</th><th>Last seen</th></tr></thead>
+<thead><tr><th scope="col">Defect</th><th scope="col">Level</th><th scope="col">Count</th><th scope="col">Trend</th><th scope="col">Last seen</th></tr></thead>
 <tbody>
 {{range .Recent}}
 <tr>
-  <td><a href="/issues/{{.ID}}">{{.Title}}</a></td>
-  <td><span class="badge lvl-{{.Level}}">{{or .Level "error"}}</span></td>
+  <td><a href="{{tl $.Toolbar (printf "/issues/%d" .ID) "from" $.Self}}">{{trunc .Title 110}}</a></td>
+  <td><span class="badge lvl-{{or .Level "error"}}">{{or .Level "error"}}</span></td>
   <td class="num">{{.Count}}</td>
-  <td>{{with index $.Spark .ID}}{{if .}}<svg class="spark" width="96" height="24" viewBox="0 0 96 24"><polyline class="spark-line" points="{{spark .}}"/></svg>{{else}}<span class="faint">—</span>{{end}}{{else}}<span class="faint">—</span>{{end}}</td>
+  <td>{{with index $.Spark .ID}}{{if .}}{{template "sparkline" .}}{{else}}<span class="faint">—</span>{{end}}{{else}}<span class="faint">—</span>{{end}}</td>
   <td class="dim nowrap" title="{{.LastSeenAt.Format "2006-01-02 15:04:05"}}">{{rel .LastSeenAt}}</td>
 </tr>
 {{end}}
 </tbody>
 </table>
-{{else}}<p class="empty">No open issues.</p>{{end}}
+{{else}}<p class="empty">No open defects in this window. <a href="{{tl .Toolbar "/errors"}}">Open the full error stream</a>.</p>{{end}}
 <h2>Slowest routes</h2>
 {{if .Summary.TopRoutes}}
 <table>
-<thead><tr><th>Route</th><th>Requests</th><th>Avg</th><th>Max</th></tr></thead>
+<thead><tr><th scope="col">Route</th><th scope="col">Requests</th><th scope="col">Avg</th><th scope="col">Max</th></tr></thead>
 <tbody>
 {{range .Summary.TopRoutes}}<tr><td class="mono">{{.Name}}</td><td class="num">{{.Count}}</td><td class="num nowrap">{{ms .AvgMs}}</td><td class="num nowrap">{{ms .MaxMs}}</td></tr>{{end}}
 </tbody>
 </table>
-{{else}}<p class="empty">No sampled requests in the window.</p>{{end}}
+{{else}}<p class="empty">No sampled requests in the window. <a href="{{tl .Toolbar "/performance"}}">Check the endpoints table</a> — request timings need sampling on the producer.</p>{{end}}
 <h2>Log volume by level</h2>
 {{if .Summary.LogLevels}}
 {{range .Summary.LogLevels}}
 <div class="bar-row"><div><span class="badge lvl-{{.Level}}">{{.Level}}</span></div><div class="track"><div class="fill" style="width:{{pcti .Count $.MaxLevel}}%"></div></div><div class="num mono dim">{{.Count}}</div></div>
 {{end}}
-{{else}}<p class="empty">No log events.</p>{{end}}
+{{else}}<p class="empty">No log events. <a href="{{tl .Toolbar "/keys"}}">Check the ingest key</a> and the producer's log channel.</p>{{end}}
 {{end}}
-<h2>Slowest queries{{if .All}} · all projects{{end}}</h2>
+
+<h2>Slowest queries</h2>
 {{if .TopQueries}}
 <table>
-<thead><tr><th>SQL</th><th>Total</th><th>Count</th><th>Max</th></tr></thead>
+<thead><tr><th scope="col">SQL</th>{{if .All}}<th scope="col">Project</th>{{end}}<th scope="col">Total</th><th scope="col">Count</th><th scope="col">Max</th></tr></thead>
 <tbody>
-{{range .TopQueries}}<tr><td class="mono" title="{{.SQL}}">{{trunc .SQL 90}}</td><td class="num nowrap">{{ms .TotalMs}}</td><td class="num">{{.Count}}</td><td class="num nowrap">{{ms .MaxMs}}</td></tr>{{end}}
+{{range .TopQueries}}<tr><td class="mono sql-cell" title="{{.SQL}}">{{trunc .SQL 90}}</td>{{if $.All}}<td class="mono dim">{{.ProjectKey}}</td>{{end}}<td class="num nowrap">{{ms .TotalMs}}</td><td class="num">{{.Count}}</td><td class="num nowrap">{{ms .MaxMs}}</td></tr>{{end}}
 </tbody>
 </table>
-{{else}}<p class="empty">No slow queries captured — enable MONITOR_SLOW_QUERY_MS on the backend.</p>{{end}}
-<h2>Cron &amp; job health{{if .All}} · all projects{{end}}</h2>
+{{else}}<p class="empty">No slow queries captured. <a href="{{tl .Toolbar "/queries"}}">Open the query leaderboard</a> — rows need <code class="mono">MONITOR_SLOW_QUERY_MS</code> on the producer.</p>{{end}}
+
+<h2>Cron &amp; job health</h2>
 {{if .Jobs}}
 <table>
-<thead><tr><th>Name</th><th>Kind</th><th>Last run</th><th>Status</th><th>Fails</th><th>Avg</th></tr></thead>
+<thead><tr><th scope="col">Name</th>{{if .All}}<th scope="col">Project</th>{{end}}<th scope="col">Kind</th><th scope="col">Last run</th><th scope="col">Status</th><th scope="col">Fails</th><th scope="col">Avg</th></tr></thead>
 <tbody>
-{{range .Jobs}}<tr><td class="mono" title="{{.Name}}">{{trunc .Name 70}}</td><td class="dim">{{.Kind}}</td><td class="dim nowrap" title="{{.LastRunAt.Format "2006-01-02 15:04:05"}}">{{rel .LastRunAt}}</td><td><span class="badge lvl-{{if eq .LastStatus "ok"}}info{{else}}error{{end}}">{{.LastStatus}}</span></td><td class="num">{{if .Failures24h}}{{.Failures24h}}{{else}}—{{end}}</td><td class="num nowrap">{{ms .AvgMs}}</td></tr>{{end}}
+{{range .Jobs}}<tr><td class="mono" title="{{.Name}}">{{trunc .Name 70}}</td>{{if $.All}}<td class="mono dim">{{.ProjectKey}}</td>{{end}}<td class="dim">{{.Kind}}</td><td class="dim nowrap" title="{{.LastRunAt.Format "2006-01-02 15:04:05"}}">{{rel .LastRunAt}}</td><td><span class="badge lvl-{{if eq .LastStatus "ok"}}info{{else}}error{{end}}">{{.LastStatus}}</span></td><td class="num">{{if .Failures24h}}{{.Failures24h}}{{else}}—{{end}}</td><td class="num nowrap">{{ms .AvgMs}}</td></tr>{{end}}
 </tbody>
 </table>
-<a class="faint" href="{{tl .Toolbar "/jobs"}}">Full job history →</a>
-{{else}}<p class="empty">No job telemetry — enable MONITOR_JOB_CAPTURE on the backend.</p>{{end}}
-<h2>Releases{{if .All}} · all projects{{end}}</h2>
+<p class="pager"><a href="{{tl .Toolbar "/jobs"}}">Full job history →</a></p>
+{{else}}<p class="empty">No job telemetry. <a href="{{tl .Toolbar "/jobs"}}">Open the jobs table</a> — rows need <code class="mono">MONITOR_JOB_CAPTURE</code>.</p>{{end}}
+
+<h2>Releases</h2>
 {{if .Releases}}
 <table>
-<thead><tr><th>Version</th><th>Env</th><th>Deployed</th><th>Errors</th><th>Sampled reqs</th><th>Crash-free</th></tr></thead>
+<thead><tr><th scope="col">Version</th>{{if .All}}<th scope="col">Project</th>{{end}}<th scope="col">Env</th><th scope="col">Deployed</th><th scope="col">Errors</th><th scope="col">Sampled reqs</th><th scope="col">Crash-free</th></tr></thead>
 <tbody>
-{{range .Releases}}<tr><td class="mono" title="{{.Version}}">{{trunc .Version 40}}</td><td class="dim">{{or .Environment "—"}}</td><td class="dim nowrap" title="{{.At.Format "2006-01-02 15:04:05"}}">{{rel .At}}</td><td class="num">{{.Errors24h}}</td><td class="num">{{.SampledReqs24h}}</td><td class="num">{{.CrashFree}}</td></tr>{{end}}
+{{range .Releases}}<tr><td class="mono" title="{{.Version}}">{{trunc .Version 40}}</td>{{if $.All}}<td class="mono dim">{{.ProjectKey}}</td>{{end}}<td class="dim">{{or .Environment "—"}}</td><td class="dim nowrap" title="{{.At.Format "2006-01-02 15:04:05"}}">{{rel .At}}</td><td class="num">{{.Errors24h}}</td><td class="num">{{.SampledReqs24h}}</td><td class="num">{{.CrashFree}}</td></tr>{{end}}
 </tbody>
 </table>
 <p class="faint">Crash-free is a sampled estimate: request timings are sampled upstream while errors are full-volume — treat it as a conservative bound.</p>
-{{else}}<p class="empty">No release markers yet — POST /ingest/{project}/release from your CI.</p>{{end}}
+{{else}}<p class="empty">No release markers. <a href="{{tl .Toolbar "/keys"}}">Copy the project key</a>, then POST <code class="mono">/ingest/{project}/release</code> from CI.</p>{{end}}
 {{end}}

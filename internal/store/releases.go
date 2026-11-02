@@ -12,6 +12,7 @@ import (
 // release can never grow the table.
 
 type ReleaseMark struct {
+	ProjectKey  string
 	Version     string
 	Environment string
 	At          time.Time
@@ -38,10 +39,10 @@ func (s *Store) RecordRelease(projectKey, version, environment string) error {
 func (s *Store) LatestRelease(projectKey, env string) (*ReleaseMark, error) {
 	var r ReleaseMark
 	var at int64
-	err := s.rdb.QueryRow(`SELECT version, COALESCE(environment, ''), released_at FROM releases
+	err := s.rdb.QueryRow(`SELECT project_key, version, COALESCE(environment, ''), released_at FROM releases
 		WHERE (? = '' OR project_key = ?) AND (? = '' OR environment = ?)
 		ORDER BY released_at DESC, id DESC LIMIT 1`,
-		projectKey, projectKey, env, env).Scan(&r.Version, &r.Environment, &at)
+		projectKey, projectKey, env, env).Scan(&r.ProjectKey, &r.Version, &r.Environment, &at)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -67,7 +68,7 @@ func (s *Store) ReleasesWithHealth(project string, limit int) ([]ReleaseHealth, 
 	if limit <= 0 || limit > 50 {
 		limit = 5
 	}
-	rows, err := s.rdb.Query(`SELECT version, COALESCE(environment, ''), released_at FROM releases
+	rows, err := s.rdb.Query(`SELECT project_key, version, COALESCE(environment, ''), released_at FROM releases
 		WHERE (? = '' OR project_key = ?)
 		ORDER BY released_at DESC, id DESC LIMIT ?`, project, project, limit)
 	if err != nil {
@@ -78,7 +79,7 @@ func (s *Store) ReleasesWithHealth(project string, limit int) ([]ReleaseHealth, 
 	for rows.Next() {
 		var h ReleaseHealth
 		var at int64
-		if err := rows.Scan(&h.Version, &h.Environment, &at); err != nil {
+		if err := rows.Scan(&h.ProjectKey, &h.Version, &h.Environment, &at); err != nil {
 			return nil, err
 		}
 		h.At = time.Unix(at, 0)

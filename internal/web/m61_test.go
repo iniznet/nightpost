@@ -31,7 +31,7 @@ func TestEveryRouteRendersWithZeroParams(t *testing.T) {
 			t.Errorf("GET %s: status %d", path, resp.StatusCode)
 			continue
 		}
-		for _, want := range []string{"fenrirealm", "class=\"toolbar\"", "<main class=\"wrap\">"} {
+		for _, want := range []string{"nightpost", "class=\"appbar\"", "<main class=\"wrap\" id=\"main\">"} {
 			if !strings.Contains(body, want) {
 				t.Errorf("GET %s: layout fragment %q missing", path, want)
 			}
