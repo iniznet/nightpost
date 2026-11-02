@@ -1,13 +1,8 @@
 {{define "title"}}{{.Issue.Title}} — nightpost{{end}}
-{{define "subtabs"}}
-<div class="tabs">
-  <a href="{{tl .Toolbar "/errors"}}" class="tab on">Issues</a>
-  <a href="{{tl .Toolbar "/errors" "tab" "logs"}}" class="tab">Logs</a>
-</div>
-{{end}}
+{{define "subtabs"}}{{template "tabsErrors" .}}{{end}}
+{{define "heading"}}{{.Issue.Title}}{{end}}
 {{define "content"}}
-<p><a href="{{tl .Toolbar .BackPath}}">← Issues</a></p>
-<h1>{{.Issue.Title}}</h1>
+<p class="crumbs"><a href="{{tl .Toolbar .BackPath}}">← Back to the list</a><span class="faint">·</span><span class="faint">{{or .Issue.ProjectKey "all projects"}}</span></p>
 <p class="meta">
   <span class="badge">{{.Issue.Type}}</span>
   {{if .Issue.ExceptionClass}}<span class="badge mono">{{.Issue.ExceptionClass}}</span>{{end}}

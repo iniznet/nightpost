@@ -1,10 +1,11 @@
 {{define "title"}}Jobs — nightpost{{end}}
+{{define "subtabs"}}{{template "tabsPerf" .}}{{end}}
+{{define "heading"}}Jobs &amp; commands{{end}}
 {{define "content"}}
-<h1>Jobs &amp; commands</h1>
 <p class="faint">Queue jobs and Artisan commands grouped by name over the last 7 days — cadence, outcome and a rolling 24h failure count. Payloads and arguments are never captured.</p>
 {{if .Rows}}
 <table>
-<thead><tr><th>Name</th><th>Kind</th><th>Queue</th><th>Last run</th><th>Status</th><th>Runs</th><th>Fails 24h</th><th>Avg</th><th>Last</th></tr></thead>
+<thead><tr><th scope="col">Name</th><th scope="col">Kind</th><th scope="col">Queue</th><th scope="col">Last run</th><th scope="col">Status</th><th scope="col">Runs</th><th scope="col">Fails 24h</th><th scope="col">Avg</th><th scope="col">Last</th></tr></thead>
 <tbody>
 {{range .Rows}}
 <tr>
@@ -21,5 +22,5 @@
 {{end}}
 </tbody>
 </table>
-{{else}}<p class="empty">No job telemetry captured yet — enable MONITOR_JOB_CAPTURE on the backend.</p>{{end}}
+{{else}}<p class="empty">No job telemetry captured yet. <a href="{{tl .Toolbar "/performance"}}">Check endpoint latency meanwhile</a> — queue and command rows need <code class="mono">MONITOR_JOB_CAPTURE</code> on the producer.</p>{{end}}
 {{end}}

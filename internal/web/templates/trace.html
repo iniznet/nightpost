@@ -1,13 +1,7 @@
 {{define "title"}}Trace {{.TraceID}} — nightpost{{end}}
-{{define "subtabs"}}
-<div class="tabs">
-  <a href="{{tl .Toolbar "/performance"}}" class="tab">Endpoints</a>
-  <a href="{{tl .Toolbar "/performance" "tab" "traces"}}" class="tab on">Traces</a>
-  <a href="{{tl .Toolbar "/performance" "tab" "hotspots"}}" class="tab">Hotspots</a>
-</div>
-{{end}}
+{{define "subtabs"}}{{template "tabsPerf" .}}{{end}}
+{{define "heading"}}Trace {{trunc .TraceID 16}}{{end}}
 {{define "content"}}
-<h1>Trace</h1>
 <p class="faint"><span class="mono">{{.TraceID}}</span> · total <span class="mono">{{ms .Trace.TotalMs}}</span> · {{len .Trace.Legs}} legs · <span title="{{.Trace.FirstSeen.Format "2006-01-02 15:04:05"}}">{{rel .Trace.FirstSeen}}</span></p>
 <div class="filterbar">
 {{range .Trace.Legs}}

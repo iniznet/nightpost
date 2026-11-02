@@ -1,13 +1,8 @@
 {{define "title"}}Logs — nightpost{{end}}
 {{define "extrahead"}}<meta http-equiv="refresh" content="15">{{end}}
-{{define "subtabs"}}
-<div class="tabs">
-  <a href="{{tl .Toolbar "/errors"}}" class="tab{{if or (eq .Page "errors") (eq .Page "issues")}} on{{end}}">Issues</a>
-  <a href="{{tl .Toolbar "/errors" "tab" "logs"}}" class="tab{{if eq .Page "logs"}} on{{end}}">Logs</a>
-</div>
-{{end}}
+{{define "subtabs"}}{{template "tabsErrors" .}}{{end}}
+{{define "heading"}}Logs{{end}}
 {{define "content"}}
-<h1>Logs</h1>
 <p class="faint">The Monolog stream: one row per channel+level+message fingerprint. <b>Channel</b> is the emitter (Laravel log channel, e.g. <span class="mono">security</span>); <b>env</b> is the deployment the record came from.</p>
 <div class="filterbar">
   <span class="label">level</span>
@@ -15,24 +10,21 @@
   {{range .Levels}}<a href="{{tl $.Toolbar $.Path "level" .Level}}" class="pill{{if eq $.Filter.Level .Level}} on{{end}}">{{.Level}} <span class="faint">{{.Count}}</span></a>{{end}}
 </div>
 <form class="filterbar" method="get" action="{{.Path}}">
-  {{if .Tab}}<input type="hidden" name="tab" value="{{.Tab}}">{{end}}
-  <input type="hidden" name="project" value="{{.Toolbar.Project}}">
-  <input type="hidden" name="range" value="{{.Toolbar.Range}}">
-  <input type="hidden" name="env" value="{{.Toolbar.Env}}">
+  {{template "scopehidden" .}}
   {{if .Filter.Level}}<input type="hidden" name="level" value="{{.Filter.Level}}">{{end}}
   <span class="label">channel</span>
   <input name="channel" value="{{.Filter.Channel}}" placeholder="channel">
   <span class="label">search</span>
   <input type="search" name="q" value="{{.Filter.Q}}" placeholder="Search messages">
-  <button>Apply</button>
+  <button class="primary">Apply filters</button>
 </form>
 {{if .Issues}}
 <table>
-<thead><tr><th>Message</th><th>Channel</th><th>Level</th><th>Env</th><th>Count</th><th>Last seen</th></tr></thead>
+<thead><tr><th scope="col">Message</th><th scope="col">Channel</th><th scope="col">Level</th><th scope="col">Env</th><th scope="col">Count</th><th scope="col">Last seen</th></tr></thead>
 <tbody>
 {{range .Issues}}
 <tr>
-  <td><a href="/issues/{{.ID}}">{{.Title}}</a></td>
+  <td><a href="{{tl $.Toolbar (printf "/issues/%d" .ID) "from" $.Self}}">{{.Title}}</a></td>
   <td class="mono dim">{{if .Channel}}{{.Channel}}{{else}}<span class="faint">—</span>{{end}}</td>
   <td><span class="badge lvl-{{.Level}}">{{or .Level "info"}}</span></td>
   <td class="dim">{{or .Environment "—"}}</td>
@@ -42,6 +34,6 @@
 {{end}}
 </tbody>
 </table>
-{{else}}<p class="empty">No log events match.</p>{{end}}
+{{else}}<p class="empty">No log events match. <a href="{{tl .Toolbar .Path}}">Clear every filter</a> — or check that the producer's Monolog channel points at the TCP socket.</p>{{end}}
 {{if .NextURL}}<p class="pager"><a href="{{.NextURL}}">Older →</a></p>{{end}}
 {{end}}

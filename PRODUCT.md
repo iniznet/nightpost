@@ -29,9 +29,12 @@ defect, where, since when".
 - A reader asking "why is my data missing?" gets an answer from the page
   footer, not from a support thread.
 ## Surface map (Operate mode)
-Two consolidated sections, each with tabs, plus the standalone surfaces. Every
-page carries the same persistent toolbar (project · time range · env) and the
-same footer ingest-health strip.
+Four destinations — **Now · Errors · Performance · Configure** — because a data
+surface and a configuration surface are different jobs. Every page carries the
+same sticky bar: destinations on line one, scope on line two. Scope is stated in
+words under the page title ("backend · 24h · production"), and every filter form
+carries the full scope through one shared partial, so a page filter can never
+widen or narrow the tenant scope silently.
 **Errors** — `/errors`
 - *Issues* (default): error-class defect list, filters, trend sparklines,
   keyset pagination, per-fingerprint detail at `/issues/{id}`. Log-type
@@ -47,9 +50,11 @@ same footer ingest-health strip.
 - *Hotspots*: self-time leaderboard over recent callgraphs, with an
   app-vs-framework scope filter, proportional bars, a real file column and
   pagination.
-**Standalone** — `/` dashboard (triage cards per project: open issues, errors,
-new-since-release, p95 delta vs the previous window, error spark, deep links
-into both sections) · `/queries` slow statements · `/jobs` queue/command
+**Now** — `/` opens with a ranked **Top defects right now** block across every
+project in scope (project · defect · level · count · trend · last seen), then the
+per-project strip, then the aggregates. Each aggregate table carries a Project
+column, so an all-projects row is attributable. The triage card that answers
+"new since release / p95 delta" survives on the single-project view. · `/queries` slow statements · `/jobs` queue/command
 health · `/orgs` organizations (create an org, move projects under it) ·
 `/keys` per-project ingest keys · `/settings` operator settings.
 History: the pre-paths (`/issues`, `/logs`, `/profiles`, `/slowest`,

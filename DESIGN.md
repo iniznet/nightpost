@@ -1,72 +1,96 @@
 # DESIGN.md
 
-> Written for the M3 UI overhaul (); extended by
-> the IA consolidation (). The world:
-> **precision ops** — a dense, calm, dark instrument panel; GitHub-dark
-> adjacent but tokenized and self-consistent. Server-rendered, zero runtime
-> JavaScript (except meta-refresh on the log stream), SVG drawn server-side.
+> Rewritten for the triage-first shell (iniznet/fenrirealm-tracker#525). The world:
+> **a triage instrument** — dense, dark, and ranked. The first screen answers one
+> question: *which defect, where, since when*. Server-rendered, zero runtime
+> JavaScript except the log stream's meta refresh, SVG drawn server-side.
 
-## Tokens
+## Type scale — five sizes, one owner each
 
-- Surfaces: `--bg #0b0e14`, panel `#12161f`, raised `#171c26`, borders
-  `#232a35` / `#2e3744`.
-- Text: `#dce3ec` body, `#94a0b0` muted, `#7e8ba4` faint (12px meta only).
-- Accent `#4d9fff` (links, bars, active nav); semantic: red `#ff6b5e`,
-  yellow `#e3b341`, green `#4ade80`, purple `#b48cff` (hotspots).
-- Type: Segoe UI Variable/system sans for prose; ui-monospace stack for
-  code, data values, channels, routes — monospace is for data, never costume.
-- Numbers in tables use tabular-nums; tables are the primary structure
-  (this is an instrument, not a card wall).
+| Size | Owns |
+|---|---|
+| 24px | the page title (`h1`) — the only 24px element on any page |
+| 15px | the brand, a card title |
+| 14px | body copy, table cells |
+| 12px | meta: scope line, faint notes, empty states |
+| 11px | `th`, badges, control labels (uppercase) |
 
-## Navigation & context
+Rules: an `h2` is a section label at 11px uppercase — never larger than the
+`h1`, never competing with it. Data values use the mono stack. Numbers use
+tabular figures. One focal block per page carries the only 24px number.
 
-- Topbar: sticky, brand lowercase mono, six section links (Dashboard, Errors,
-  Performance, Queries, Jobs, Keys) with an accent underline on the active
-  section — the section is derived from the page, never re-typed per template.
-- Toolbar: sticky second row holding the ONE persistent context — org,
-  project, time range (1h/24h/7d/30d, default 24h) and env. It is a single GET form
-  posting to the current path, so changing context never loses the section.
-  Every generated link carries the toolbar through `toolbar.Link`; the default
-  range encodes away so short legacy links stay short. Pre-auth pages hide it.
-- Tabs: a section's pages share one tab row (Errors: Issues | Logs;
-  Performance: Endpoints | Traces | Hotspots). An unknown or empty tab
-  resolves to the section default — never a 404.
-- Project pills stay in the topbar for one-click switching; they carry the
-  rest of the toolbar with them.
+## Three levels, three treatments
+
+1. **Section** — top bar, filled segment (`Now` · `Errors` · `Performance` ·
+   `Configure`). Four destinations, because a data surface and a config surface
+   are different jobs.
+2. **Tab** — underline, inside the page head, below the `h1`. Errors: Issues |
+   Logs. Performance: Endpoints | Traces | Hotspots | Queries | Jobs.
+   Configure: Keys | Organisations | Settings.
+3. **Page** — the `h1`, plus the scope line.
+
+A level never borrows another level's mark. The active state is `aria-current`,
+not a colour alone.
+
+## Chrome
+
+- **One sticky bar, two lines.** Destinations on line one, scope on line two,
+  inside one `header.appbar`. Nothing slides under anything: the old pair of
+  sticky rows both at `top:0` is gone.
+- **Scope is one control group.** Org is always present (it gates what a reader
+  may see). Project, range and env render only on the sections they change —
+  configuration pages show org alone, because the others do nothing there.
+- **The scope is stated in words** under every `h1`: "backend · 24h ·
+  production". A reader never reconstructs scope from four selects.
+- **One filter form per page**, built from the shared `scopehidden` partial so
+  `org` can never be dropped again. The page's own button reads "Apply
+  filters"; the bar's button reads "Apply".
+- **Drill paths carry their origin.** A row link sends `from=<list URL>`; the
+  detail page's back link returns there, filters intact, and refuses an
+  absolute target.
+
+## The landing page answers the question
+
+`/` opens with a ranked block: **Top defects right now** — project · defect ·
+level · count · trend · last seen, ranked by pain, across every project in
+scope. Project cards become a one-line strip; the aggregates below each carry a
+Project column. This is the 10-second answer PRODUCT.md promises, and it is the
+one place the shell spends its emphasis.
 
 ## Components
 
-- Cards: used only for dashboard triage (per-project health) and as a
-  raised panel; the projects landing page is a card grid, not a table.
-- Badge: 11px, dim surface + colored text for levels (error/warning/info/
-  debug, critical family maps to error red); `warn`/`ok` variants for state.
-- Track+fill bars: 14px rounded tracks for waterfalls/hotspot shares; 6px
-  inline bars inside tables. Bars inside a table cell keep the cell
-  `nowrap` so a duration never wraps away from its bar.
-- Sparkline: server-rendered polyline, 96x24, accent stroke; always labeled
-  with what it counts. Latency deltas render as signed percent with a
-  semantic color, never as an unlabeled arrow.
-- Tabs: 2px accent bottom border on the active tab, 1px rule under the row.
-- Health footer: the ingest-rejection counters (shaper 429 / keygate 401 /
-  unsigned admits) beside the store figures, on every page — the answer to
-  "why is my data missing?". It replaces the old per-page `store:` debug line.
-- Filters: inline GET forms; selects inherit panel surface; hidden toolbar
-  fields keep the context when a page filter is applied; pills for
-  log-level, scope and view toggles.
-- Settings page: an editable table (key + label, value input, an explicit
-  `live`/`restart` badge, and the note that says why). The applied-ness badge
-  is the honest part of the design — a setting that silently needs a restart
-  is a support ticket.
-- Tables: `display:block; overflow-x:auto`, so a wide table scrolls inside
-  its own box and the page never gains a horizontal scrollbar.
+- Badge: 11px, solid dark tint plus coloured text for levels. Solid, not alpha:
+  a translucent fill reads as 1:1 contrast to a checker and to a low-vision
+  reader.
+- Track+fill bars: 14px for waterfalls and hotspots, 6px inline in tables.
+- Sparkline: server-rendered polyline, 96×24, `role="img"` with a label.
+- Tabs: 2px underline on `aria-current`.
+- Confirm step: destructive key actions open a `<details class="confirm">` and
+  need a second press. Zero JavaScript, two deliberate clicks.
+- Health footer: ingest rejections beside store figures, on every page — the
+  answer to "why is my data missing?".
+- Empty state: names the next action and links it. Never a dead end. Never a
+  cap without saying so.
+- Failure: any page-level error renders inside the shell, with a retry and a
+  way back.
+
+## Responsive
+
+One breakpoint at 720px. The sticky bar keeps both lines; scope controls reach
+44px on touch. Wide tables scroll inside their own box, never the page.
 
 ## Motion
 
-Hover states only (rows, pills, buttons, summary, tabs). No entrances, no
-scroll effects — an ops tool must never move under an on-call reader.
+Hover states only. No entrances, no scroll effects — an ops tool must not move
+under an on-call reader.
 
-## Bans (this surface)
+## Bans
 
-No decorative gradients, no glass beyond the sticky topbar blur, no icon
-fonts, no client-side state management, no light mode. Auto-refresh exists
-only on the log stream (meta refresh), never on filtered lists.
+No decorative gradients, no glass beyond the sticky bar's blur, no icon fonts,
+no client-side state, no light mode. Auto-refresh only on the log stream. No
+two controls for one decision (the duplicate project pills are gone).
+
+## Known gap
+
+`docs/screenshots/*` predate this shell. Regenerating them needs a human
+browser session; the file names and capture paths stay the same.

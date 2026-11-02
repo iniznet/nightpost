@@ -1,6 +1,7 @@
 {{define "title"}}Ingest keys — nightpost{{end}}
+{{define "subtabs"}}{{template "tabsConfigure" .}}{{end}}
+{{define "heading"}}Ingest keys{{end}}
 {{define "content"}}
-<h1>Ingest keys</h1>
 <p class="faint">Per-project bearer keys for every ingest route. A project without a key still accepts unsigned (legacy) traffic; rotating or revoking takes effect immediately — update the producer env in the same window. Revoking drops the project back to unsigned (legacy) admission.</p>
 <p class="faint">The <b>Browser origin</b> column is the allowlist for in-page reporters (the profile/error routes). Leave it empty to inherit the install default set by <code class="mono">-cors-origin</code>; a wildcard is refused, because these routes accept unauthenticated browser posts.</p>
 {{if .NewKey}}
@@ -14,7 +15,7 @@
 {{end}}
 {{if .ProjectRows}}
 <table>
-<thead><tr><th>Project</th><th>Ingest key</th><th>Browser origin</th><th>Rotated</th><th></th></tr></thead>
+<thead><tr><th scope="col">Project</th><th scope="col">Ingest key</th><th scope="col">Browser origin</th><th scope="col">Rotated</th><th scope="col"></th></tr></thead>
 <tbody>
 {{range .ProjectRows}}
 <tr>
@@ -29,20 +30,32 @@
   </td>
   <td class="dim">{{if .RotatedAt.IsZero}}—{{else}}{{rel .RotatedAt}}{{end}}</td>
   <td class="actions">
-    <form method="post" action="/keys/rotate">
-      <input type="hidden" name="project" value="{{.Key}}">
-      <button type="submit">{{if .HasKey}}Rotate{{else}}Issue key{{end}}</button>
-    </form>
+    <details class="confirm">
+      <summary>{{if .HasKey}}Rotate key{{else}}Issue key{{end}}</summary>
+      <div class="cf">
+        <form method="post" action="/keys/rotate">
+          <input type="hidden" name="project" value="{{.Key}}">
+          <button class="danger" type="submit">{{if .HasKey}}Rotate now{{else}}Issue now{{end}}</button>
+        </form>
+        <span class="faint">{{if .HasKey}}the old key stops working immediately{{else}}shown once, copy it before leaving{{end}}</span>
+      </div>
+    </details>
     {{if .HasKey}}
-    <form method="post" action="/keys/revoke">
-      <input type="hidden" name="project" value="{{.Key}}">
-      <button type="submit">Revoke</button>
-    </form>
+    <details class="confirm">
+      <summary>Revoke</summary>
+      <div class="cf">
+        <form method="post" action="/keys/revoke">
+          <input type="hidden" name="project" value="{{.Key}}">
+          <button class="danger" type="submit">Revoke now</button>
+        </form>
+        <span class="faint">drops the project to unsigned traffic</span>
+      </div>
+    </details>
     {{end}}
   </td>
 </tr>
 {{end}}
 </tbody>
 </table>
-{{else}}<p class="empty">No projects yet — they are provisioned automatically from ingest traffic.</p>{{end}}
+{{else}}<p class="empty">No projects yet. <a href="{{tl .Toolbar "/"}}">Send one event</a> and it appears here automatically.</p>{{end}}
 {{end}}

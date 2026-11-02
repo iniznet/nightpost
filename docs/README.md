@@ -28,20 +28,25 @@ Captured from a live local install of the real binary — not generated in CI. T
 instance had three projects and 239 wire-spec requests posted into it, so the
 pages show real aggregates rather than empty states.
 
+**These images predate the triage-first shell** (iniznet/fenrirealm-tracker#525):
+they show the old eight-item topbar and the old dashboard cards. The pages listed
+below are the same routes with the same content; recapturing needs one browser
+session against a live install.
+
 | Page | Screenshot |
 |---|---|
 | First-run setup — `/setup`, the only open page until an admin exists | ![First-run setup](screenshots/00-first-run-setup.png) |
-| Dashboard — per-project health cards + the live ingest-health strip | ![Dashboard](screenshots/01-dashboard.png) |
+| Now (home) — ranked defects across projects + the live ingest-health strip | ![Now](screenshots/01-dashboard.png) |
 | Errors ▸ Issues — fingerprint groups, counts, first/last seen | ![Errors: issues](screenshots/02-errors-issues.png) |
 | Errors ▸ Logs — channel/level stream | ![Errors: logs](screenshots/03-errors-logs.png) |
 | Performance ▸ Endpoints — route-aggregated p50/p95/count | ![Performance: endpoints](screenshots/04-performance-endpoints.png) |
 | Performance ▸ Traces — trace index with tree badge, deep-linkable | ![Performance: traces](screenshots/05-performance-traces.png) |
 | Performance ▸ Hotspots — proportional bars, app-vs-framework | ![Performance: hotspots](screenshots/06-performance-hotspots.png) |
-| Queries — fingerprint-grouped slow SQL | ![Queries](screenshots/07-queries.png) |
-| Jobs — queue/command runs and heartbeats | ![Jobs](screenshots/08-jobs.png) |
-| Keys — per-project ingest keys, rotation and CORS origin | ![Keys](screenshots/09-keys.png) |
-| Settings — retention, prune interval, per-project profile budget, per-project CORS origin | ![Settings](screenshots/10-settings.png) |
-| Orgs — org/project grouping | ![Orgs](screenshots/11-orgs.png) |
+| Performance ▸ Queries — fingerprint-grouped slow SQL | ![Queries](screenshots/07-queries.png) |
+| Performance ▸ Jobs — queue/command runs and heartbeats | ![Jobs](screenshots/08-jobs.png) |
+| Configure ▸ Keys — per-project ingest keys, rotation and CORS origin | ![Keys](screenshots/09-keys.png) |
+| Configure ▸ Settings — retention, prune interval, per-project profile budget, per-project CORS origin | ![Settings](screenshots/10-settings.png) |
+| Configure ▸ Organisations — org/project grouping | ![Orgs](screenshots/11-orgs.png) |
 
 A **quickstart GIF** is still absent, and deliberately: the UI is server-rendered
 with zero JavaScript, so there is no state transition worth animating — a slide
