@@ -1,0 +1,47 @@
+# nightpost — clean-host quickstart.
+#
+# This file is for a host that is NOT ours. It runs the published image, joins
+# a network compose creates, publishes one port, and keeps state in one named
+# volume. Nothing here needs a Go toolchain, a clone of our deploy, or a
+# network created outside compose.
+#
+#   docker compose -f docker-compose.quickstart.yml up -d
+#   curl -fsS http://127.0.0.1:8000/ready
+#
+# Or skip compose entirely:
+#   docker run -d --name nightpost -p 8000:8000 -v np-data:/data \
+#     ghcr.io/iniznet/nightpost:latest
+#
+# docker-compose.yml is the OPERATOR deployment: it builds locally, joins the
+# external dokploy-network, and publishes no host port. A clean host has no
+# such network, so `docker compose up` there stops on the first step.
+services:
+  monitor:
+    image: ghcr.io/iniznet/nightpost:latest
+    container_name: nightpost
+    restart: unless-stopped
+    # One published port, because the UI is the point of a first install.
+    # Narrow it to 127.0.0.1:8000:8000 when the host is public and you reach
+    # the dashboard through a tunnel. Ingest shares this port; see DEPLOY.md
+    # ("Exposing it publicly") before you leave it open.
+    ports:
+      - "8000:8000"
+    volumes:
+      - monitor-data:/data
+    environment:
+      APP_ENV: production
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8000/up"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+        compress: "true"
+
+volumes:
+  monitor-data:

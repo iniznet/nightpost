@@ -10,18 +10,40 @@ start, which deploy was live, and why was it slow.*
 
 ## Quickstart
 
+One command, on a host with docker and nothing else:
+
 ```sh
-git clone <this repo> && cd nightpost
-printf 'APP_ENV=production\n' > .env
-docker compose up -d --build
-docker compose exec monitor wget -qO- http://127.0.0.1:8000/ready
+docker run -d --name nightpost -p 8000:8000 -v np-data:/data \
+  ghcr.io/iniznet/nightpost:latest
+curl -fsS http://127.0.0.1:8000/ready     # 200 when the store answers
 ```
 
-The compose file publishes **no host port** on purpose: consumers reach it by
-service name, and host bindings fight other projects on a shared node. Open the
-UI through the docker network, or a temporary port override, and finish first-run
-`/setup`. Then issue an ingest key per producer at **`/keys`** — that page also
-holds each project's browser-origin allowlist.
+Open `http://<host>:8000` and finish first-run `/setup`. Then issue one ingest
+key per producer at **`/keys`** — that page also holds each project's
+browser-origin allowlist.
+
+Compose works too, from a clean host:
+
+```sh
+git clone https://github.com/iniznet/nightpost && cd nightpost
+docker compose -f docker-compose.quickstart.yml up -d
+```
+
+Build it yourself, still without compose:
+
+```sh
+git clone https://github.com/iniznet/nightpost && cd nightpost
+docker build -t nightpost:latest .
+docker run -d --name nightpost -p 8000:8000 -v np-data:/data nightpost:latest
+```
+
+`docker-compose.yml` in this repo is **our** operator deployment, not yours. It
+builds locally, joins an external `dokploy-network`, and publishes no host port.
+A clean host has no such network, so a bare `docker compose up` fails there on
+the first step. Use `docker-compose.quickstart.yml`, or the one-liner above.
+
+The image contract: state lives in `/data` (a named volume, and the session key
+inside it), the UI listens on `8000`, and nothing ships telemetry on its own.
 
 **Nothing ships telemetry until you say so.** Every sender is off until an
 operator adds one environment line to a *producer*; an install enables nothing,
