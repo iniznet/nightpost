@@ -20,20 +20,20 @@ Everything is off by default. Each line turns one sender on.
 
 | Variable | Turns on |
 |---|---|
-| `MONITOR_ENABLED=true` | the Laravel-level sender at all (the master switch) |
-| `MONITOR_ENDPOINT` | where it posts |
-| `MONITOR_PROJECT_KEY` | the project this deployment reports as |
-| `MONITOR_INGEST_KEY` | the key from `/keys` |
+| `NIGHTPOST_ENABLED=true` | the Laravel-level sender at all (the master switch) |
+| `NIGHTPOST_ENDPOINT` | where it posts |
+| `NIGHTPOST_PROJECT_KEY` | the project this deployment reports as |
+| `NIGHTPOST_INGEST_KEY` | the key from `/keys` |
 | `LOG_STACK=…,monitor` | shipping log lines to the TCP socket |
-| `MONITOR_LOG_SOCKET_URL` | the socket address for that leg (`tcp://monitor:9913`) |
-| `MONITOR_LOG_LEVEL` | which levels the default stack ships |
+| `NIGHTPOST_LOG_SOCKET_URL` | the socket address for that leg (`tcp://monitor:9913`) |
+| `NIGHTPOST_LOG_LEVEL` | which levels the default stack ships |
 | `SENTRY_LARAVEL_DSN` | exception events (sentry-laravel owns this name; the DSN path is the server's project bucket) |
 | `PROFILER_ENDPOINT` | xhprof callgraphs (`http://backend@monitor:8000/api/profiler/store` — the URL user is the project, the password is the ingest key) |
 | `XHPROF_ENABLED` | the extension-gated profiler at all |
-| `MONITOR_SAMPLE_RATE` | request timing samples |
-| `MONITOR_PROFILE_RATE` | deep code attribution samples |
-| `MONITOR_SLOW_QUERY_MS` | the slow-query threshold |
-| `MONITOR_JOB_CAPTURE` | queue/console job capture (batched; redacted by construction) |
+| `NIGHTPOST_SAMPLE_RATE` | request timing samples |
+| `NIGHTPOST_PROFILE_RATE` | deep code attribution samples |
+| `NIGHTPOST_SLOW_QUERY_MS` | the slow-query threshold |
+| `NIGHTPOST_JOB_CAPTURE` | queue/console job capture (batched; redacted by construction) |
 
 ## Three traps
 

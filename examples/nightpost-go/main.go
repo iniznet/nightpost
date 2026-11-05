@@ -12,7 +12,7 @@ import (
 func main() {
 	c := NewFromEnv()
 	if c == nil {
-		log.Fatal("set NIGHTPOST_ENDPOINT (or MONITOR_ENDPOINT) — an unconfigured client is inert by design")
+		log.Fatal("set NIGHTPOST_ENDPOINT — an unconfigured client is inert by design")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

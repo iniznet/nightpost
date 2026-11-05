@@ -8,13 +8,13 @@ shape.
 
 | Variable | Turns on |
 |---|---|
-| `MONITOR_URL` | the endpoint the reporter posts to |
-| `MONITOR_PROJECT_KEY` | the project this deployment reports as |
-| `MONITOR_KEY` | the key from `/keys` |
-| `MONITOR_SAMPLE_RATE` | request timing samples |
-| `MONITOR_PROFILE_RATE` | deep samples |
+| `NIGHTPOST_URL` | the endpoint the reporter posts to |
+| `NIGHTPOST_PROJECT_KEY` | the project this deployment reports as |
+| `NIGHTPOST_KEY` | the key from `/keys` |
+| `NIGHTPOST_SAMPLE_RATE` | request timing samples |
+| `NIGHTPOST_PROFILE_RATE` | deep samples |
 
-Off by default: with `MONITOR_URL` unset the reporter is inert and the app runs
+Off by default: with `NIGHTPOST_URL` unset the reporter is inert and the app runs
 exactly as it did before.
 
 ## Server-side (SSR)
@@ -22,11 +22,11 @@ exactly as it did before.
 Post from the hook — the same shape the reference client uses:
 
 ```ts
-await fetch(`${MONITOR_URL}/ingest/${PROJECT}/profile`, {
+await fetch(`${NIGHTPOST_URL}/ingest/${PROJECT}/profile`, {
   method: 'POST',
   headers: {
     'content-type': 'application/json',
-    'x-monitor-key': MONITOR_KEY,
+    'x-monitor-key': NIGHTPOST_KEY,
     'x-nightpost-client': 'my-app/1.0',
     traceparent: incomingTraceparent ?? ''
   },

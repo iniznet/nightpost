@@ -47,20 +47,15 @@ func TestInertClientIsSafeToCall(t *testing.T) {
 	}
 }
 
-func TestNewFromEnvDualRead(t *testing.T) {
+func TestNewFromEnvReadsOneNamespace(t *testing.T) {
 	t.Setenv("MONITOR_ENDPOINT", "http://legacy:8000")
 	t.Setenv("NIGHTPOST_ENDPOINT", "http://brand:8000")
 	if c := NewFromEnv(); c == nil || c.endpoint != "http://brand:8000" {
-		t.Errorf("NIGHTPOST_* must win the dual read, got %+v", c)
+		t.Errorf("NIGHTPOST_* must be read, got %+v", c)
 	}
 	t.Setenv("NIGHTPOST_ENDPOINT", "")
-	if c := NewFromEnv(); c == nil || c.endpoint != "http://legacy:8000" {
-		t.Errorf("MONITOR_* must be the fallback, got %+v", c)
-	}
-	t.Setenv("MONITOR_ENDPOINT", "")
-	t.Setenv("MONITOR_SOCKET", "")
 	if c := NewFromEnv(); c != nil {
-		t.Error("no environment at all must build an inert client")
+		t.Error("a legacy MONITOR_* name must be inert — no environment is an inert client")
 	}
 }
 

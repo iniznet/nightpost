@@ -54,22 +54,16 @@ func New(endpoint, socket, key string) *Client {
 	}
 }
 
-// NewFromEnv reads the dual-read environment (WIRE_SPEC: NIGHTPOST_* first,
-// then the legacy MONITOR_* name), so a producer migrates by adding a variable
-// rather than by rewriting configuration.
+// NewFromEnv reads the producer environment: NIGHTPOST_ENDPOINT,
+// NIGHTPOST_SOCKET and NIGHTPOST_KEY. One namespace only — a legacy name is
+// inert by design, so a half-migrated host reports nothing instead of posting
+// to a target nobody meant to configure.
 func NewFromEnv() *Client {
-	first := func(names ...string) string {
-		for _, n := range names {
-			if v := strings.TrimSpace(os.Getenv(n)); v != "" {
-				return v
-			}
-		}
-		return ""
-	}
+	env := func(name string) string { return strings.TrimSpace(os.Getenv(name)) }
 	return New(
-		first("NIGHTPOST_ENDPOINT", "MONITOR_ENDPOINT"),
-		first("NIGHTPOST_SOCKET", "MONITOR_SOCKET"),
-		first("NIGHTPOST_KEY", "MONITOR_KEY"),
+		env("NIGHTPOST_ENDPOINT"),
+		env("NIGHTPOST_SOCKET"),
+		env("NIGHTPOST_KEY"),
 	)
 }
 

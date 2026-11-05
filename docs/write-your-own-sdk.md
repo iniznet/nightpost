@@ -11,10 +11,10 @@ port and the server agree — not that the port agrees with itself.
 
 ## The four decisions a port has to make
 
-1. **Where does configuration come from?** Read your brand's variable first, then
-   the legacy name, so a producer migrates by adding a variable rather than by
-   rewriting config:
-   `NIGHTPOST_ENDPOINT` → `MONITOR_ENDPOINT`, `NIGHTPOST_KEY` → `MONITOR_KEY`.
+1. **Where does configuration come from?** One namespace: `NIGHTPOST_ENDPOINT`,
+   `NIGHTPOST_SOCKET`, `NIGHTPOST_KEY`. No legacy alias, because a half-migrated
+   host must be visibly inert rather than silently posting to a target nobody
+   meant to configure.
 2. **Off by default, structurally.** Not "documented as off" — *unconstructible
    when unconfigured*. The reference client returns `nil`, and every method is a
    no-op on a `nil` receiver, so calling code never branches on "is telemetry
