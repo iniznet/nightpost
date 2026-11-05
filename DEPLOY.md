@@ -9,39 +9,61 @@ public.
 ### From the published image
 
 The release pipeline publishes a multi-arch (amd64 + arm64) image to GHCR on
-every `v*` tag — `ghcr.io/iniznet/nightpost`. To use it instead of
-building locally, point compose at the image:
+every `v*` tag. No clone, no build, no network of ours:
 
-```yaml
-services:
-  monitor:
-    image: ghcr.io/iniznet/nightpost:latest
-    # ...the rest of docker-compose.yml unchanged
+```sh
+docker run -d --name nightpost -p 8000:8000 -v np-data:/data \
+  ghcr.io/iniznet/nightpost:latest
+curl -fsS http://127.0.0.1:8000/ready
 ```
+
+Then open `http://<host>:8000` and finish first-run `/setup`.
 
 `latest` only ever moves on a tag, never on a push to `main`. A non-public
 package needs `docker login ghcr.io` once on the host.
 
+Use `-p 127.0.0.1:8000:8000` instead when the host is public and you reach the
+dashboard through a tunnel. Ingest shares that port; read "Exposing it publicly"
+below before you leave it open.
+
+The same image through compose, on a host that is not ours:
+
+```sh
+git clone https://github.com/iniznet/nightpost && cd nightpost
+docker compose -f docker-compose.quickstart.yml up -d
+docker compose -f docker-compose.quickstart.yml exec monitor \
+  wget -qO- http://127.0.0.1:8000/ready
+```
+
 ### From source
 
 ```sh
-git clone <repo> && cd nightpost
-printf 'APP_ENV=production\n' > .env
-docker compose up -d --build
-docker compose exec monitor wget -qO- http://127.0.0.1:8000/ready
+git clone https://github.com/iniznet/nightpost && cd nightpost
+docker build -t nightpost:latest .
+docker run -d --name nightpost -p 8000:8000 -v np-data:/data nightpost:latest
 ```
+
+### Which compose file runs where
+
+| File | Host | What it does |
+|---|---|---|
+| `docker-compose.quickstart.yml` | yours | published image, one published port, one named volume |
+| `docker-compose.yml` | ours | builds locally, joins the external `dokploy-network`, publishes no host port |
+
+`docker-compose.yml` is the operator deployment. A clean host has no
+`dokploy-network`, so `docker compose up` there stops at once with "network
+dokploy-network declared as external, but could not be found". Use the
+quickstart file on your own machine.
 
 The dashboard session key is generated on first boot and persisted at
 `/data/session.key` (0600) inside the volume — the image's `CMD` sets
 `--session-secret-file` — so a restart or a redeploy does not log the admins
 out. Without that flag the key would be random per boot.
 
-Then open the UI (through the docker network or a temporary port override) and
-finish first-run `/setup`.
-
 `docker-compose.yml` publishes **no host port** on purpose — every consumer
 reaches the service by name over the docker network, and host bindings fight
-other projects on a shared node. To reach the UI ad hoc:
+other projects on a shared node. The quickstart file publishes one, because a
+first install has no docker network to ride. To reach the UI on our node ad hoc:
 
 ```sh
 docker exec nightpost-production wget -qO- http://127.0.0.1:8000/up
