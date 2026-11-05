@@ -6,11 +6,11 @@
 # Deploy topology: the container joins dokploy-network so the backend stack's
 # senders target it by service name — the exact defaults already committed to
 # the backend compose:
-#   MONITOR_LOG_SOCKET_URL=monitor:9913
+#   NIGHTPOST_LOG_SOCKET_URL=monitor:9913
 #   PROFILER_ENDPOINT=http://backend@monitor:8000/api/profiler/store
 #   SENTRY_LARAVEL_DSN=http://backend@monitor:8000/1
-#   MONITOR_ENDPOINT=http://monitor:8000  (Laravel MonitorClient)
-#   MONITOR_URL=http://monitor:8000       (SvelteKit reporter)
+#   NIGHTPOST_ENDPOINT=http://monitor:8000  (Laravel MonitorClient)
+#   NIGHTPOST_URL=http://monitor:8000       (SvelteKit reporter)
 #
 # UI: NOT published to the host. It HAS auth (M4: HMAC session cookie +
 # first-run /setup), but it is still not meant to ride Dokploy ingress — reach

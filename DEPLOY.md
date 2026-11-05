@@ -81,8 +81,8 @@ producer's environment:
 | Laravel logs | `LOG_STACK` gains `monitor` |
 | Laravel exceptions | `SENTRY_LARAVEL_DSN` |
 | xhprof callgraphs | `PROFILER_ENDPOINT` |
-| Laravel timing / MonitorClient | `MONITOR_ENDPOINT` |
-| SvelteKit reporter | `MONITOR_URL` |
+| Laravel timing / MonitorClient | `NIGHTPOST_ENDPOINT` |
+| SvelteKit reporter | `NIGHTPOST_URL` |
 
 Removing the variable turns the sender off again. Nothing is inferred, and no
 installer writes these for you.
