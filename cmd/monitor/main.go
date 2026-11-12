@@ -46,7 +46,12 @@ func main() {
 	resetAdmin := flag.String("reset-admin", "", "one-shot: reset (or create) this admin email's password, write it to a 0600 file, and exit — never printed to the log")
 	resetAdminOut := flag.String("reset-admin-out", "", "where -reset-admin writes the minted password (default <db-dir>/admin-reset.txt, mode 0600)")
 	alertsConfig := flag.String("alerts-config", "", "path to alerts JSON (channels + rules); empty = alerting disabled")
+	fresh := flag.Bool("fresh", false, "delete the SQLite database files (including -wal/-shm) before opening, forcing a clean v2 schema rebuild (v1 data is dropped)")
 	flag.Parse()
+
+	if *fresh {
+		removeDBFiles(*dbPath)
+	}
 
 	st, err := store.Open(*dbPath)
 	if err != nil {
@@ -336,6 +341,19 @@ func logDBGuard(dbPath string) {
 		return
 	}
 	log.Printf("db mount: %s (%s) — persistent", m.dir, m.fstype)
+}
+
+// removeDBFiles deletes the database and its WAL/SHM sidecars before a
+// --fresh boot, so the v2 schema is created from scratch rather than by
+// additive migration over an older volume. Sidecars are removed first because
+// deleting the main file while a WAL still exists can resurrect stale pages.
+func removeDBFiles(dbPath string) {
+	for _, p := range []string{dbPath + "-wal", dbPath + "-shm", dbPath} {
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			log.Fatalf("fresh: remove %s: %v", p, err)
+		}
+	}
+	log.Printf("fresh: removed %s", dbPath)
 }
 
 // dbMount finds the deepest /proc/mounts entry containing the path's

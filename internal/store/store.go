@@ -86,6 +86,15 @@ type Issue struct {
 
 const dsnPragmas = "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)&_pragma=wal_autocheckpoint(1000)"
 
+// SchemaVersion marks the v2 storage shape introduced by the journeys model.
+// The number is informational for operators and tests: the additive column
+// and index steps below stay individually idempotent so an upgraded volume
+// does not need a reset, while --fresh drops the files and rebuilds from
+// scratch. It deliberately does not gate the migrations — the individual
+// ALTER/CREATE steps are the source of truth, so a partially upgraded volume
+// is completed by the next boot instead of being refused.
+const SchemaVersion = 2
+
 func Open(path string) (*Store, error) {
 	wdb, err := sql.Open("sqlite", path+dsnPragmas)
 	if err != nil {
@@ -188,6 +197,8 @@ func migrate(db *sql.DB) error {
 		{"profiles.trace_id", `ALTER TABLE profiles ADD COLUMN trace_id TEXT NOT NULL DEFAULT ''`},
 		{"idx_profiles_trace", `CREATE INDEX IF NOT EXISTS idx_profiles_trace ON profiles(trace_id, created_at DESC)`},
 		{"profiles.tree", `ALTER TABLE profiles ADD COLUMN tree TEXT`},
+		{"profiles.spans", `ALTER TABLE profiles ADD COLUMN spans TEXT`},
+		{"profiles.hotspots", `ALTER TABLE profiles ADD COLUMN hotspots TEXT`},
 		{"projects", `CREATE TABLE IF NOT EXISTS projects (
 	key TEXT PRIMARY KEY,
 	ingest_key TEXT NOT NULL DEFAULT '',
@@ -271,6 +282,97 @@ func migrate(db *sql.DB) error {
 	key TEXT PRIMARY KEY,
 	value TEXT NOT NULL,
 	updated_at INTEGER NOT NULL DEFAULT 0)`},
+		{"issues.group_source", `ALTER TABLE issues ADD COLUMN group_source TEXT NOT NULL DEFAULT 'server'`},
+		{"issues.merged_into", `ALTER TABLE issues ADD COLUMN merged_into INTEGER NOT NULL DEFAULT 0`},
+		{"issues.assignee_user_id", `ALTER TABLE issues ADD COLUMN assignee_user_id INTEGER NOT NULL DEFAULT 0`},
+		{"issues.ignored_until", `ALTER TABLE issues ADD COLUMN ignored_until INTEGER NOT NULL DEFAULT 0`},
+		{"profiles.service_id", `ALTER TABLE profiles ADD COLUMN service_id INTEGER`},
+		{"profiles.route_id", `ALTER TABLE profiles ADD COLUMN route_id INTEGER`},
+		{"profiles.span_id", `ALTER TABLE profiles ADD COLUMN span_id TEXT NOT NULL DEFAULT ''`},
+		{"profiles.kind", `ALTER TABLE profiles ADD COLUMN kind TEXT NOT NULL DEFAULT 'request'`},
+		{"job_stats.schedule_cron", `ALTER TABLE job_stats ADD COLUMN schedule_cron TEXT`},
+		{"job_stats.grace_seconds", `ALTER TABLE job_stats ADD COLUMN grace_seconds INTEGER`},
+		{"job_stats.next_expected_at", `ALTER TABLE job_stats ADD COLUMN next_expected_at INTEGER`},
+		{"job_stats.registered_at", `ALTER TABLE job_stats ADD COLUMN registered_at INTEGER`},
+		{"releases.sessions", `ALTER TABLE releases ADD COLUMN sessions INTEGER`},
+		{"releases.crash_sessions", `ALTER TABLE releases ADD COLUMN crash_sessions INTEGER`},
+		{"releases.crash_free", `ALTER TABLE releases ADD COLUMN crash_free REAL`},
+		{"services", `CREATE TABLE IF NOT EXISTS services (
+	id INTEGER PRIMARY KEY,
+	project_key TEXT NOT NULL,
+	name TEXT NOT NULL,
+	runtime TEXT NOT NULL DEFAULT '',
+	env TEXT NOT NULL DEFAULT '',
+	trusted_traceparent INTEGER NOT NULL DEFAULT 0,
+	first_seen_at INTEGER,
+	last_seen_at INTEGER,
+	UNIQUE(project_key, name))`},
+		{"routes", `CREATE TABLE IF NOT EXISTS routes (
+	id INTEGER PRIMARY KEY,
+	service_id INTEGER NOT NULL,
+	method TEXT NOT NULL DEFAULT '',
+	pattern TEXT NOT NULL,
+	kind TEXT NOT NULL DEFAULT 'http',
+	first_seen_at INTEGER,
+	last_seen_at INTEGER,
+	UNIQUE(service_id, method, pattern))`},
+		{"spans", `CREATE TABLE IF NOT EXISTS spans (
+	id INTEGER PRIMARY KEY,
+	trace_id TEXT NOT NULL,
+	span_id TEXT NOT NULL,
+	parent_span_id TEXT NOT NULL DEFAULT '',
+	service_id INTEGER,
+	route_id INTEGER,
+	kind TEXT NOT NULL,
+	name TEXT NOT NULL,
+	start_ms REAL NOT NULL DEFAULT 0,
+	duration_ms REAL NOT NULL DEFAULT 0,
+	status TEXT NOT NULL DEFAULT 'ok',
+	peer_service_id INTEGER,
+	attributes TEXT,
+	created_at INTEGER)`},
+		{"idx_spans_trace", `CREATE INDEX IF NOT EXISTS idx_spans_trace ON spans(trace_id)`},
+		{"idx_spans_created", `CREATE INDEX IF NOT EXISTS idx_spans_created ON spans(created_at)`},
+		{"idx_spans_service_created", `CREATE INDEX IF NOT EXISTS idx_spans_service_created ON spans(service_id, created_at)`},
+		{"journeys", `CREATE TABLE IF NOT EXISTS journeys (
+	id INTEGER PRIMARY KEY,
+	pattern_key TEXT NOT NULL UNIQUE,
+	entry_kind TEXT NOT NULL,
+	entry_route_id INTEGER,
+	hop_count INTEGER,
+	samples INTEGER,
+	p50_ms REAL,
+	p95_ms REAL,
+	first_seen_at INTEGER,
+	last_seen_at INTEGER)`},
+		{"idx_journeys_entry_p95", `CREATE INDEX IF NOT EXISTS idx_journeys_entry_p95 ON journeys(entry_kind, p95_ms DESC)`},
+		{"journey_hops", `CREATE TABLE IF NOT EXISTS journey_hops (
+	journey_id INTEGER,
+	position INTEGER,
+	route_id INTEGER,
+	status TEXT,
+	p95_ms REAL,
+	share REAL,
+	PRIMARY KEY(journey_id, position))`},
+		{"sessions", `CREATE TABLE IF NOT EXISTS sessions (
+	id INTEGER PRIMARY KEY,
+	project_key TEXT,
+	release TEXT,
+	session_id TEXT,
+	status TEXT,
+	route_id INTEGER,
+	started_at INTEGER,
+	duration_ms INTEGER,
+	UNIQUE(project_key, session_id))`},
+		{"idx_sessions_project_started", `CREATE INDEX IF NOT EXISTS idx_sessions_project_started ON sessions(project_key, started_at)`},
+		{"raw_envelopes", `CREATE TABLE IF NOT EXISTS raw_envelopes (
+	id INTEGER PRIMARY KEY,
+	project_key TEXT,
+	received_at INTEGER,
+	route TEXT,
+	accepted INTEGER,
+	error TEXT,
+	body BLOB)`},
 	} {
 		if _, err := db.Exec(m.stmt); err != nil {
 			// Idempotent: only "already applied" failures may pass through.
