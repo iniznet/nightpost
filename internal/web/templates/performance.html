@@ -1,0 +1,44 @@
+{{define "title"}}Performance — nightpost{{end}}
+{{define "heading"}}Performance{{end}}
+{{define "content"}}
+<p class="faint">Every route in scope, ranked by the wall clock it spent. Open a route to walk one request from the front render to the other service and back.</p>
+{{if .Rows}}
+<table>
+<thead><tr><th scope="col">Route</th><th scope="col">Project</th><th scope="col">Reqs</th><th scope="col">p50</th><th scope="col">p95</th><th scope="col">Max</th><th scope="col">Total</th><th scope="col">Other p95</th><th scope="col">Traced</th></tr></thead>
+<tbody>
+{{range .Rows}}
+<tr>
+  <td><a href="/performance/route?route={{.Name | urlquery}}&amp;project={{.Project | urlquery}}">{{.Name}}</a></td>
+  <td class="dim">{{.Project}}</td>
+  <td class="num">{{.Count}}</td>
+  <td class="num nowrap">{{ms .P50Ms}}</td>
+  <td class="num nowrap">{{ms .P95Ms}}</td>
+  <td class="num nowrap">{{ms .MaxMs}}</td>
+  <td class="num nowrap"><span class="inline-bar"><span class="fill hot-fill" style="width:{{pct .TotalMs $.MaxTotal}}%"></span></span><span class="mono">{{ms .TotalMs}}</span></td>
+  <td class="num nowrap">{{if .BackendP95}}{{ms .BackendP95}}{{else}}<span class="dim">not received</span>{{end}}</td>
+  <td class="num nowrap"><span class="mono">{{printf "%.0f%%" .TracedPct}}</span></td>
+</tr>
+{{end}}
+</tbody>
+</table>
+<p class="faint">Traced is the share of this route's requests that carried another service's leg, and Other p95 is that leg's p95. Both stay empty until a second service reports the same trace.</p>
+{{else}}<p class="empty">No request profiles in this range. <a href="/keys">Copy the project key</a> and set <code class="mono">NIGHTPOST_SAMPLE_RATE</code> on a producer.</p>{{end}}
+<h2>Slow queries</h2>
+{{if .Queries}}
+<table>
+<thead><tr><th scope="col">Statement</th><th scope="col">Calls</th><th scope="col">Total</th><th scope="col">Max</th><th scope="col">Last seen</th></tr></thead>
+<tbody>
+{{range .Queries}}<tr><td class="mono">{{.SQL}}</td><td class="num">{{.Count}}</td><td class="num nowrap">{{ms .TotalMs}}</td><td class="num nowrap">{{ms .MaxMs}}</td><td class="dim nowrap">{{rel .LastSeen}}</td></tr>{{end}}
+</tbody>
+</table>
+{{else}}<p class="empty">No slow statements in this range. <a href="/settings">Lower the capture threshold</a> to record them.</p>{{end}}
+<h2>Jobs and commands</h2>
+{{if .Jobs}}
+<table>
+<thead><tr><th scope="col">Name</th><th scope="col">Kind</th><th scope="col">Runs</th><th scope="col">Failures</th><th scope="col">Avg</th><th scope="col">Last run</th></tr></thead>
+<tbody>
+{{range .Jobs}}<tr><td class="mono">{{.Name}}</td><td class="dim">{{.Kind}}</td><td class="num">{{.Runs}}</td><td class="num">{{.Failures}}</td><td class="num nowrap">{{ms .AvgMs}}</td><td class="dim nowrap">{{rel .LastRunAt}}</td></tr>{{end}}
+</tbody>
+</table>
+{{else}}<p class="empty">No job telemetry in this range. <a href="/settings">Turn on job capture</a> on the producer.</p>{{end}}
+{{end}}

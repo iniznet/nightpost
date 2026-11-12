@@ -1,5 +1,4 @@
 {{define "title"}}Trace {{.TraceID}} — nightpost{{end}}
-{{define "subtabs"}}{{template "tabsPerf" .}}{{end}}
 {{define "heading"}}Trace {{trunc .TraceID 16}}{{end}}
 {{define "content"}}
 <p class="faint"><span class="mono">{{.TraceID}}</span> · total <span class="mono">{{ms .Trace.TotalMs}}</span> · {{len .Trace.Legs}} legs · <span title="{{.Trace.FirstSeen.Format "2006-01-02 15:04:05"}}">{{rel .Trace.FirstSeen}}</span></p>

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -284,20 +285,17 @@ type server struct {
 	health IngestHealth
 	cors   originInvalidator
 
-	dashboard *template.Template
-	issues    *template.Template
-	detail    *template.Template
-	logs      *template.Template
-	profiles  *template.Template
-	profile   *template.Template
-	slowest   *template.Template
-	traces    *template.Template
-	trace     *template.Template
-	keys      *template.Template
-	queries   *template.Template
-	jobs      *template.Template
-	orgs      *template.Template
-	settings  *template.Template
+	dashboard   *template.Template
+	issues      *template.Template
+	detail      *template.Template
+	logs        *template.Template
+	performance *template.Template
+	routePage   *template.Template
+	profile     *template.Template
+	trace       *template.Template
+	keys        *template.Template
+	orgs        *template.Template
+	settings    *template.Template
 
 	settingDefaults store.SettingDefaults
 
@@ -693,22 +691,19 @@ func (s *server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 // mode tests and pre-M4 dev runs use that.
 func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *Auth, opts ...Option) {
 	s := &server{
-		st:        st,
-		gate:      gate,
-		dashboard: mustLayout("dashboard.html"),
-		issues:    mustLayout("index.html"),
-		detail:    mustLayout("detail.html"),
-		logs:      mustLayout("logs.html"),
-		profiles:  mustLayout("profiles.html"),
-		profile:   mustLayout("profile.html"),
-		slowest:   mustLayout("slowest.html"),
-		traces:    mustLayout("traces.html"),
-		trace:     mustLayout("trace.html"),
-		keys:      mustLayout("keys.html"),
-		queries:   mustLayout("queries.html"),
-		jobs:      mustLayout("jobs.html"),
-		orgs:      mustLayout("orgs.html"),
-		settings:  mustLayout("settings.html"),
+		st:          st,
+		gate:        gate,
+		dashboard:   mustLayout("dashboard.html"),
+		issues:      mustLayout("index.html"),
+		detail:      mustLayout("detail.html"),
+		logs:        mustLayout("logs.html"),
+		performance: mustLayout("performance.html"),
+		routePage:   mustLayout("route.html"),
+		profile:     mustLayout("profile.html"),
+		trace:       mustLayout("trace.html"),
+		keys:        mustLayout("keys.html"),
+		orgs:        mustLayout("orgs.html"),
+		settings:    mustLayout("settings.html"),
 	}
 	for _, o := range opts {
 		o(s)
@@ -738,16 +733,16 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *A
 	page.HandleFunc("POST /issues/{id}/reopen", s.resolveHandler(false))
 	page.HandleFunc("GET /logs", s.handleLogs)
 
-	// Performance section: one nav item, Endpoints / Traces / Hotspots tabs.
+	// Performance section: one route-first page (tracker #656). The five peer
+	// tabs it replaced shared no key, so a reader could not get from "this page
+	// is slow" to "this step is slow". Legacy paths land on the merged index.
 	page.HandleFunc("GET /performance", s.handlePerformance)
-	page.HandleFunc("GET /profiles", s.handleProfiles)
+	page.HandleFunc("GET /performance/route", s.handleRouteDetail)
 	page.HandleFunc("GET /profiles/{id}", s.handleProfileDetail)
-	page.HandleFunc("GET /traces", s.handleTraces)
 	page.HandleFunc("GET /traces/{id}", s.handleTraceDetail)
-	page.HandleFunc("GET /slowest", s.handleSlowest)
-
-	page.HandleFunc("GET /queries", s.handleQueries)
-	page.HandleFunc("GET /jobs", s.handleJobs)
+	for _, legacy := range []string{"/profiles", "/traces", "/slowest", "/queries", "/jobs"} {
+		page.HandleFunc("GET "+legacy, s.perfRedirect)
+	}
 	page.HandleFunc("GET /orgs", s.handleOrgs)
 	page.HandleFunc("POST /orgs/create", s.handleOrgCreate)
 	page.HandleFunc("POST /orgs/assign", s.handleOrgAssign)
@@ -1073,73 +1068,220 @@ func (s *server) handleLogs(w http.ResponseWriter, r *http.Request) {
 
 // handlePerformance is the Performance-section dispatcher: Endpoints is the
 // default tab and an unknown tab resolves to it, never a 404.
+// handlePerformance is the merged Performance index (tracker #656). One table
+// answers two questions: which route costs the most wall clock, and did the
+// other service actually answer for it. The five peer tabs it replaced
+// (Endpoints / Traces / Hotspots / Queries / Jobs) shared no key, so a reader
+// could not walk from "this page is slow" to "this step is slow".
 func (s *server) handlePerformance(w http.ResponseWriter, r *http.Request) {
-	switch r.URL.Query().Get("tab") {
-	case "traces":
-		s.handleTraces(w, r)
-	case "hotspots":
-		s.handleSlowest(w, r)
-	default:
-		s.handleProfiles(w, r)
-	}
-}
-
-func (s *server) handleProfiles(w http.ResponseWriter, r *http.Request) {
 	t := parseToolbar(r.URL.Query())
-	q := r.URL.Query()
-	typeFilter := q.Get("type")
-	view := q.Get("view")
-	search := q.Get("q")
-	page := PagePerformance
-	if r.URL.Path == "/profiles" {
-		page = PageProfiles
-	}
-	data := s.baseData(r, t, page)
-	data["TypeF"] = typeFilter
-	data["View"] = view
-	data["Q"] = search
-	if view != "raw" && (typeFilter == store.ProfileTypeRequest || typeFilter == store.ProfileTypeCallgraph) {
-		// Aggregated-by-route is the default view: a flat recency list
-		// repeats the same hot route ten times and hides what actually
-		// accumulates wall-clock time.
-		routes, err := s.st.ProfileRouteStats(t.Project, typeFilter, t.Hours(), 50)
-		if err != nil {
-			s.fail(w, r, err)
-			return
-		}
-		data["Routes"] = routes
-		var maxTotal float64
-		for _, ra := range routes {
-			if ra.TotalMs > maxTotal {
-				maxTotal = ra.TotalMs
-			}
-		}
-		data["MaxTotal"] = maxTotal
-		data["Profiles"] = nil
-		if err := s.profiles.ExecuteTemplate(w, "layout", data); err != nil {
-			log.Printf("render profiles: %v", err)
-		}
-		return
-	}
-	profiles, err := s.st.ProfilesFiltered(t.Project, typeFilter, search, 50)
+	data := s.baseData(r, t, PagePerformance)
+	rows, err := s.st.RouteIndex(t.Project, t.Hours(), 50)
 	if err != nil {
 		s.fail(w, r, err)
 		return
 	}
-	var maxDur float64
-	for _, p := range profiles {
-		if p.DurationMs > maxDur {
-			maxDur = p.DurationMs
+	var maxTotal float64
+	for _, row := range rows {
+		if row.TotalMs > maxTotal {
+			maxTotal = row.TotalMs
 		}
 	}
-	data["Profiles"] = profiles
-	data["MaxDur"] = maxDur
-	if err := s.profiles.ExecuteTemplate(w, "layout", data); err != nil {
-		log.Printf("render profiles: %v", err)
+	data["Rows"] = rows
+	data["MaxTotal"] = maxTotal
+	if q, qerr := s.st.QueryLeaderboard(t.Project, t.Hours(), 10); qerr == nil {
+		data["Queries"] = q
+	}
+	if j, jerr := s.st.JobLeaderboard(t.Project, t.Hours(), 10); jerr == nil {
+		data["Jobs"] = j
+	}
+	if err := s.performance.ExecuteTemplate(w, "layout", data); err != nil {
+		log.Printf("render performance: %v", err)
 	}
 }
 
-func (s *server) handleProfileDetail(w http.ResponseWriter, r *http.Request) {
+// perfRedirect keeps every pre-merge bookmark alive: an old tab path lands on
+// the merged index with the scope it carried.
+func (s *server) perfRedirect(w http.ResponseWriter, r *http.Request) {
+	target := "/performance"
+	if q := r.URL.RawQuery; q != "" {
+		target += "?" + q
+	}
+	http.Redirect(w, r, target, http.StatusFound)
+}
+
+// StepRow is one row of a request's front -> other service walk. Kind drives
+// the order and the gap row, so missing data is visible, never absent.
+type StepRow struct {
+	Kind    string
+	Project string
+	Name    string
+	Ms      float64
+	Left    float64
+	Width   float64
+	Note    string
+}
+
+const (
+	stepRender  = "render"
+	stepSpan    = "span"
+	stepLeg     = "leg"
+	stepMissing = "missing"
+)
+
+// orderSteps sorts the walk into the order a request happens: front render,
+// the spans it reported, the other service's legs, then an explicit gap. It is
+// pure so the order is a tested contract, not a template accident.
+func orderSteps(steps []StepRow) []StepRow {
+	rank := map[string]int{stepRender: 0, stepSpan: 1, stepLeg: 2, stepMissing: 3}
+	out := make([]StepRow, len(steps))
+	copy(out, steps)
+	sort.SliceStable(out, func(i, j int) bool { return rank[out[i].Kind] < rank[out[j].Kind] })
+	return out
+}
+
+// buildSteps turns one trace's legs into the walk a reader can follow. The
+// root leg is the request as its own service saw it, its spans are the work
+// inside it, and every other project's profile is a downstream hop.
+func buildSteps(legs []store.Profile) []StepRow {
+	if len(legs) == 0 {
+		return nil
+	}
+	sorted := make([]store.Profile, len(legs))
+	copy(sorted, legs)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].CreatedAt.Before(sorted[j].CreatedAt) })
+	root := sorted[0]
+	steps := []StepRow{{Kind: stepRender, Project: root.ProjectKey, Name: root.Name, Ms: root.DurationMs}}
+	for _, sp := range root.Spans {
+		steps = append(steps, StepRow{Kind: stepSpan, Project: root.ProjectKey, Name: sp.Name, Ms: sp.DurationMs})
+	}
+	for _, leg := range sorted[1:] {
+		steps = append(steps, StepRow{Kind: stepLeg, Project: leg.ProjectKey, Name: leg.Name, Ms: leg.DurationMs})
+	}
+	if len(sorted) < 2 {
+		steps = append(steps, StepRow{Kind: stepMissing, Note: "Other service did not report this request. Check its producer and its trace headers."})
+	}
+	return orderSteps(steps)
+}
+
+// TraceRow is one request in the drill-down: the summary a reader scans, plus
+// the steps behind it.
+type RouteTraceRow struct {
+	TraceID  string
+	TotalMs  float64
+	Legs     int
+	Projects string
+	LastSeen time.Time
+	Steps    []StepRow
+}
+
+// handleRouteDetail is the drill-down: the last traces of one route, each an
+// ordered walk with bar widths, so the waterfall needs no client script.
+func (s *server) handleRouteDetail(w http.ResponseWriter, r *http.Request) {
+	t := parseToolbar(r.URL.Query())
+	route := strings.TrimSpace(r.URL.Query().Get("route"))
+	project := strings.TrimSpace(r.URL.Query().Get("project"))
+	if project == "" {
+		project = t.Project
+	}
+	if route == "" {
+		s.failStatus(w, r, http.StatusBadRequest, "missing route")
+		return
+	}
+	data := s.baseData(r, t, PagePerformance)
+	rows, err := s.st.RouteIndex(project, t.Hours(), 200)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	var row store.RouteIndexRow
+	found := false
+	for _, candidate := range rows {
+		if candidate.Name == route && (project == "" || candidate.Project == project) {
+			row, found = candidate, true
+			break
+		}
+	}
+	if !found {
+		s.failStatus(w, r, http.StatusNotFound, "route not in this window")
+		return
+	}
+	ids, err := s.st.TraceIDsForRoute(row.Project, route, t.Hours(), 20)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	traces := make([]RouteTraceRow, 0, len(ids))
+	for _, id := range ids {
+		legs, lerr := s.st.ProfilesByTrace(id, 20)
+		if lerr != nil {
+			s.fail(w, r, lerr)
+			return
+		}
+		if len(legs) == 0 {
+			continue
+		}
+		total := 0.0
+		seen := map[string]bool{}
+		var projects []string
+		last := legs[0].CreatedAt
+		for _, leg := range legs {
+			total += leg.DurationMs
+			if !seen[leg.ProjectKey] {
+				seen[leg.ProjectKey] = true
+				projects = append(projects, leg.ProjectKey)
+			}
+			if leg.CreatedAt.After(last) {
+				last = leg.CreatedAt
+			}
+		}
+		traces = append(traces, RouteTraceRow{TraceID: id, TotalMs: total, Legs: len(legs), Projects: strings.Join(projects, ", "), LastSeen: last, Steps: sizeSteps(buildSteps(legs))})
+	}
+	hotspots, _ := s.st.SlowestCodeForRoute(row.Project, route, 200)
+	var maxSelf float64
+	for _, hs := range hotspots {
+		if hs.TotalSelfMs > maxSelf {
+			maxSelf = hs.TotalSelfMs
+		}
+	}
+	data["Row"] = row
+	data["Traces"] = traces
+	data["Hotspots"] = hotspots
+	data["MaxSelf"] = maxSelf
+	if q, qerr := s.st.QueryLeaderboard(row.Project, t.Hours(), 10); qerr == nil {
+		data["Queries"] = q
+	}
+	if err := s.routePage.ExecuteTemplate(w, "layout", data); err != nil {
+		log.Printf("render route: %v", err)
+	}
+}
+
+// sizeSteps scales every step against the longest one, because the steps
+// NEST: a span and a downstream leg both live inside the front render, so
+// adding them would draw a bar past the track (measured at 1361px in a
+// 1249px viewport). A nested step starts at zero and is only shorter.
+func sizeSteps(steps []StepRow) []StepRow {
+	longest := 0.0
+	for _, s := range steps {
+		if s.Ms > longest {
+			longest = s.Ms
+		}
+	}
+	if longest <= 0 {
+		longest = 1
+	}
+	for i := range steps {
+		steps[i].Left = 0
+		steps[i].Width = steps[i].Ms / longest * 100
+		if steps[i].Width < 0.5 && steps[i].Ms > 0 {
+			steps[i].Width = 0.5
+		}
+	}
+	return steps
+}
+
+func (s *server) handleProfileDetail(
+	w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
 		s.failStatus(w, r, http.StatusBadRequest, "bad id")
@@ -1167,23 +1309,6 @@ func (s *server) handleProfileDetail(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleTraces renders the Traces index: recent cross-service requests with
-// their leg count, total window and a has-tree badge for the drill-down.
-func (s *server) handleTraces(w http.ResponseWriter, r *http.Request) {
-	t := parseToolbar(r.URL.Query())
-	rows, err := s.st.Traces(t.Project, t.Hours(), 50)
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	data := s.baseData(r, t, PageTraces)
-	data["Traces"] = rows
-	data["DeepCap"] = 12
-	if err := s.traces.ExecuteTemplate(w, "layout", data); err != nil {
-		log.Printf("render traces: %v", err)
-	}
-}
-
 func (s *server) handleTraceDetail(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	legs, err := s.st.ProfilesByTrace(id, 20)
@@ -1201,135 +1326,6 @@ func (s *server) handleTraceDetail(w http.ResponseWriter, r *http.Request) {
 	data["TraceID"] = id
 	if err := s.trace.ExecuteTemplate(w, "layout", data); err != nil {
 		log.Printf("render trace: %v", err)
-	}
-}
-
-// handleSlowest renders the Hotspots tab: proportional self-time bars with an
-// app-vs-framework scope filter and pagination over the bounded sample set.
-func (s *server) handleSlowest(w http.ResponseWriter, r *http.Request) {
-	t := parseToolbar(r.URL.Query())
-	q := r.URL.Query()
-	scope := q.Get("scope")
-	if scope != "app" && scope != "framework" {
-		scope = "all"
-	}
-	pageNum := int(parseID(q.Get("page")))
-	if pageNum < 1 {
-		pageNum = 1
-	}
-	all, err := s.st.SlowestCode(t.Project, 500)
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	filtered := make([]store.HotspotAgg, 0, len(all))
-	for _, row := range all {
-		app := isAppFrame(row.Function, row.File)
-		if scope == "app" && !app {
-			continue
-		}
-		if scope == "framework" && app {
-			continue
-		}
-		filtered = append(filtered, row)
-	}
-	const perPage = 50
-	total := len(filtered)
-	start := (pageNum - 1) * perPage
-	if start > total {
-		start = total
-	}
-	end := start + perPage
-	if end > total {
-		end = total
-	}
-	shown := filtered[start:end]
-	var maxSelf float64
-	for _, row := range shown {
-		if row.TotalSelfMs > maxSelf {
-			maxSelf = row.TotalSelfMs
-		}
-	}
-	data := s.baseData(r, t, PageSlowest)
-	data["Rows"] = shown
-	data["MaxSelf"] = maxSelf
-	data["Scope"] = scope
-	data["Total"] = total
-	data["PageNum"] = pageNum
-	if start > 0 {
-		data["PrevURL"] = t.Link(r.URL.Path, url.Values{"scope": {scope}, "page": {strconv.Itoa(pageNum - 1)}})
-	}
-	if end < total {
-		data["NextURL"] = t.Link(r.URL.Path, url.Values{"scope": {scope}, "page": {strconv.Itoa(pageNum + 1)}})
-	}
-	if err := s.slowest.ExecuteTemplate(w, "layout", data); err != nil {
-		log.Printf("render slowest: %v", err)
-	}
-}
-
-// isAppFrame separates first-party frames from vendor/framework frames: a
-// path under vendor/ or node_modules/ is framework, as is a bare framework
-// namespace when the producer sent no file.
-func isAppFrame(fn, file string) bool {
-	f := strings.ToLower(file)
-	if strings.Contains(f, "/vendor/") || strings.Contains(f, "\\vendor\\") ||
-		strings.Contains(f, "/node_modules/") || strings.Contains(f, "\\node_modules\\") {
-		return false
-	}
-	for _, p := range []string{"illuminate\\", "symfony\\", "laravel\\", "monolog\\", "guzzlehttp\\", "predis\\", "doctrine\\", "psr\\", "sentry\\", "composer\\"} {
-		if strings.HasPrefix(strings.ToLower(fn), p) {
-			return false
-		}
-	}
-	return true
-}
-
-func (s *server) handleQueries(w http.ResponseWriter, r *http.Request) {
-	t := parseToolbar(r.URL.Query())
-	data := s.baseData(r, t, PageQueries)
-	aggs, err := s.st.QueryLeaderboard(t.Project, t.Hours(), 50)
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	type QueryRow struct {
-		SQL, Fingerprint string
-		Connection       string
-		Count            int64
-		TotalMs, AvgMs   float64
-		MaxMs            float64
-		LastSeen         time.Time
-	}
-	rows := make([]QueryRow, 0, len(aggs))
-	var maxTotal float64
-	for _, a := range aggs {
-		if a.TotalMs > maxTotal {
-			maxTotal = a.TotalMs
-		}
-		avg := 0.0
-		if a.Count > 0 {
-			avg = a.TotalMs / float64(a.Count)
-		}
-		rows = append(rows, QueryRow{SQL: a.SQL, Fingerprint: a.Fingerprint, Connection: a.Connection, Count: a.Count, TotalMs: a.TotalMs, AvgMs: avg, MaxMs: a.MaxMs, LastSeen: a.LastSeen})
-	}
-	data["Rows"] = rows
-	data["MaxTotal"] = maxTotal
-	if err := s.queries.ExecuteTemplate(w, "layout", data); err != nil {
-		log.Printf("render queries: %v", err)
-	}
-}
-
-func (s *server) handleJobs(w http.ResponseWriter, r *http.Request) {
-	t := parseToolbar(r.URL.Query())
-	data := s.baseData(r, t, PageJobs)
-	aggs, err := s.st.JobLeaderboard(t.Project, t.Hours(), 200)
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	data["Rows"] = aggs
-	if err := s.jobs.ExecuteTemplate(w, "layout", data); err != nil {
-		log.Printf("render jobs: %v", err)
 	}
 }
 

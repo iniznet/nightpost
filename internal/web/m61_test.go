@@ -47,8 +47,8 @@ func TestUnknownTabNeverFails(t *testing.T) {
 		// The exceptions tab was called "Issues" until #526.
 		{"/errors?tab=nope", "Exceptions"},
 		{"/errors?tab=", "Exceptions"},
-		{"/performance?tab=nope", "Endpoints"},
-		{"/performance?tab=", "Endpoints"},
+		{"/performance?tab=nope", "Performance"},
+		{"/performance?tab=", "Performance"},
 	}
 	for _, c := range cases {
 		resp, err := http.Get(srv.URL + c.path)
@@ -75,8 +75,6 @@ func TestLegacyRoutesServeConsolidatedContent(t *testing.T) {
 	pairs := []struct{ legacy, consolidated, marker string }{
 		{"/issues?project=backend", "/errors?project=backend", "user 42 not found"},
 		{"/logs?project=backend", "/errors?tab=logs&project=backend", "login failed"},
-		{"/profiles?project=backend&type=request", "/performance?project=backend&type=request", "GET /chapters/123"},
-		{"/slowest?project=backend", "/performance?tab=hotspots&project=backend", "Hotspots"},
 	}
 	for _, p := range pairs {
 		for _, path := range []string{p.legacy, p.consolidated} {
@@ -92,6 +90,24 @@ func TestLegacyRoutesServeConsolidatedContent(t *testing.T) {
 			if !strings.Contains(body, p.marker) {
 				t.Errorf("GET %s: marker %q missing", path, p.marker)
 			}
+		}
+	}
+
+	// The five performance tab paths merged into one page (#656). A bookmark
+	// must land on the merged index with its scope, never on a 404.
+	for _, legacy := range []string{"/profiles?project=backend&type=request", "/traces?project=backend", "/slowest?project=backend", "/queries?project=backend", "/jobs?project=backend"} {
+		client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+		resp, err := client.Get(srv.URL + legacy)
+		if err != nil {
+			t.Fatalf("GET %s: %v", legacy, err)
+		}
+		readAll(t, resp)
+		if resp.StatusCode != http.StatusFound {
+			t.Errorf("GET %s: status %d, want 302", legacy, resp.StatusCode)
+			continue
+		}
+		if loc := resp.Header.Get("Location"); !strings.HasPrefix(loc, "/performance?") {
+			t.Errorf("GET %s: location %q, want the merged index", legacy, loc)
 		}
 	}
 }
@@ -147,13 +163,16 @@ func TestTracesIndexAndDeepLink(t *testing.T) {
 	if _, err := st.RecordProfile(store_ProfileInputFront()); err != nil {
 		t.Fatalf("seed trace: %v", err)
 	}
-	resp, _ := http.Get(srv.URL + "/traces?project=front")
-	body := readAll(t, resp)
-	if !strings.Contains(body, "tree") {
-		t.Errorf("traces index missing has-tree badge: %.300s", body)
+	// The traces index is one section of the merged Performance page (#656);
+	// the path keeps answering with a redirect that carries the scope.
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	resp, _ := client.Get(srv.URL + "/traces?project=front")
+	readAll(t, resp)
+	if resp.StatusCode != http.StatusFound {
+		t.Errorf("traces index status %d, want 302", resp.StatusCode)
 	}
-	if !strings.Contains(body, "depth 12") {
-		t.Error("traces index missing the deep-cap note")
+	if loc := resp.Header.Get("Location"); loc != "/performance?project=front" {
+		t.Errorf("traces index location %q", loc)
 	}
 	resp, _ = http.Get(srv.URL + "/traces/t1")
 	if resp.StatusCode != http.StatusOK {

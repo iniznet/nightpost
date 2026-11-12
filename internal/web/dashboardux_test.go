@@ -3,6 +3,7 @@ package web
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -49,7 +50,7 @@ func TestCollapseNotFound(t *testing.T) {
 	}
 }
 
-func TestProfilesAggregatedAndRawViews(t *testing.T) {
+func TestPerformanceIndexAndRouteDrilldown(t *testing.T) {
 	srv, st := newTestServer(t)
 	for _, n := range []string{"GET /a", "GET /a", "GET /a", "GET /b"} {
 		if _, err := st.RecordProfile(store.ProfileInput{
@@ -59,26 +60,29 @@ func TestProfilesAggregatedAndRawViews(t *testing.T) {
 		}
 	}
 
-	// Default (aggregated): route rows with pain columns, no raw samples table.
-	resp, err := http.Get(srv.URL + "/profiles?project=backend&type=request")
+	// The merged index ranks routes and says when no second leg arrived.
+	resp, err := http.Get(srv.URL + "/performance?project=backend")
 	if err != nil {
 		t.Fatal(err)
 	}
 	body := readAll(t, resp)
-	for _, want := range []string{"GET /a", "p95", "aggregated"} {
+	for _, want := range []string{"GET /a", "p95", "not received", "Traced"} {
 		if !strings.Contains(body, want) {
-			t.Errorf("aggregated view missing %q", want)
+			t.Errorf("performance index missing %q", want)
 		}
 	}
 
-	// Raw drill-down filtered to one route.
-	resp, err = http.Get(srv.URL + "/profiles?project=backend&type=request&view=raw&q=%2Fa")
+	// The drill-down walks one route only, and names the gap explicitly.
+	resp, err = http.Get(srv.URL + "/performance/route?project=backend&route=" + url.QueryEscape("GET /a"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	body = readAll(t, resp)
-	if !strings.Contains(body, "GET /a") || strings.Contains(body, "GET /b") {
-		t.Errorf("raw drill-down did not filter by q: %.300s", body)
+	if !strings.Contains(body, "Request walk") {
+		t.Errorf("route detail missing the walk: %.300s", body)
+	}
+	if strings.Contains(body, "GET /b") {
+		t.Errorf("route detail leaked another route: %.300s", body)
 	}
 }
 
