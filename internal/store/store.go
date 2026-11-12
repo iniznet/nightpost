@@ -505,6 +505,10 @@ type IssueQuery struct {
 	BeforeID                                      int64
 	BeforeCount                                   int64
 	Limit                                         int
+	// IncludeIgnored lists issues whose ignore-until stamp has not lapsed. The
+	// default is to hide them: a mute an operator cannot see through the list
+	// is only useful when the list is what flooding happens on.
+	IncludeIgnored bool
 }
 
 func (s *Store) Issues(q IssueQuery) ([]Issue, error) {
@@ -530,6 +534,15 @@ func (s *Store) Issues(q IssueQuery) ([]Issue, error) {
 		q.Status,
 		q.SinceFirstSeen, q.SinceFirstSeen,
 	}
+	// A merged duplicate is collapsed into its primary, and an issue muted
+	// until a future stamp is filtered out while the mute holds. Both are read
+	// filters: ingest keeps counting either way.
+	if q.IncludeIgnored {
+		args = append(args, 1)
+	} else {
+		args = append(args, 0)
+	}
+	args = append(args, time.Now().Unix())
 	args = append(args, cursorArgs...)
 	args = append(args, limit)
 	rows, err := s.rdb.Query(`SELECT id, project_key, fingerprint, type, title, exception_class, level, environment, channel, count, first_seen_at, last_seen_at, resolved
@@ -542,6 +555,8 @@ func (s *Store) Issues(q IssueQuery) ([]Issue, error) {
 		  AND (? = '' OR title LIKE '%' || ? || '%')
 		  AND (CASE ? WHEN 'open' THEN resolved = 0 WHEN 'resolved' THEN resolved = 1 ELSE 1 END)
 		  AND archived_at = 0 AND (? <= 0 OR first_seen_at >= ?)
+		  AND merged_into = 0
+		  AND (? = 1 OR ignored_until = 0 OR ignored_until <= ?)
 	`+cursor+`
 		`+order+` LIMIT ?`,
 		args...)

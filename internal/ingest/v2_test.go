@@ -398,8 +398,17 @@ func TestSentryEnvelopeCarriesSpansAndSession(t *testing.T) {
 	if len(spans) != 2 {
 		t.Fatalf("trace holds %d spans, want the transaction root plus one child", len(spans))
 	}
-	if spans[0].Name != "GET /orders/{id}" {
-		t.Errorf("root span name = %q, want the transaction", spans[0].Name)
+	// The waterfall orders by (start_ms, span_id), and this payload gives both
+	// rows start_ms 0 while the root's span_id is minted at random — so the root
+	// is found by what makes it the root, not by arriving first.
+	root := spans[0]
+	for _, span := range spans {
+		if span.ParentSpanID == "" {
+			root = span
+		}
+	}
+	if root.Name != "GET /orders/{id}" {
+		t.Errorf("root span name = %q, want the transaction", root.Name)
 	}
 	sessions, crashed, _, err := st.CrashFree("backend", "r-9")
 	if err != nil || sessions != 1 || crashed != 0 {

@@ -223,11 +223,21 @@ func recordSentrySession(st *store.Store, projectKey string, header sentryEnvelo
 	return true
 }
 
+// recordEvent stores an event's exceptions. The grouping key is now the
+// SERVER's: a producer-supplied fingerprint enters only as a rule input, so a
+// producer that changes its scheme cannot split issue history.
 func recordEvent(st *store.Store, projectKey, environment string, event map[string]any) int {
 	level, _ := event["level"].(string)
 	if level == "" {
 		level = "error"
 	}
+	cfg, err := st.GroupingConfig(projectKey)
+	if err != nil {
+		// A settings read failure must not drop the event: the documented
+		// defaults are the policy of a project that never stored one.
+		log.Printf("grouping config %s: %v", projectKey, err)
+	}
+	producerFP := producerFingerprint(event)
 
 	recorded := 0
 	if excValues, ok := event["exception"].(map[string]any); ok {
@@ -248,8 +258,23 @@ func recordEvent(st *store.Store, projectKey, environment string, event map[stri
 				if message == "" {
 					message = "unknown exception"
 				}
-				fp := store.ForException(class, message, topFrame(exc))
-				if _, err := st.RecordError(projectKey, class, message, fp, environment, level, event); err != nil {
+				fp, source := FoldError(cfg, groupEvent{
+					Type:                class,
+					Message:             message,
+					Frames:              sentryFrames(exc),
+					ProducerFingerprint: producerFP,
+					Fields:              errorRuleFields(projectKey, class, message, producerFP, level, environment),
+				})
+				if _, err := st.RecordGroupedError(store.GroupedError{
+					ProjectKey:     projectKey,
+					ExceptionClass: class,
+					Message:        message,
+					Fingerprint:    fp,
+					GroupSource:    source,
+					Environment:    environment,
+					Level:          level,
+					Payload:        event,
+				}); err != nil {
 					log.Printf("record error: %v", err)
 					continue
 				}
@@ -263,8 +288,22 @@ func recordEvent(st *store.Store, projectKey, environment string, event map[stri
 		if message == "" {
 			message = "unknown event"
 		}
-		fp := store.ForException("Message", message, "")
-		if _, err := st.RecordError(projectKey, "Message", message, fp, environment, level, event); err != nil {
+		fp, source := FoldError(cfg, groupEvent{
+			Type:                "Message",
+			Message:             message,
+			ProducerFingerprint: producerFP,
+			Fields:              errorRuleFields(projectKey, "Message", message, producerFP, level, environment),
+		})
+		if _, err := st.RecordGroupedError(store.GroupedError{
+			ProjectKey:     projectKey,
+			ExceptionClass: "Message",
+			Message:        message,
+			Fingerprint:    fp,
+			GroupSource:    source,
+			Environment:    environment,
+			Level:          level,
+			Payload:        event,
+		}); err != nil {
 			log.Printf("record message event: %v", err)
 			return 0
 		}
@@ -272,32 +311,4 @@ func recordEvent(st *store.Store, projectKey, environment string, event map[stri
 	}
 
 	return recorded
-}
-
-// topFrame picks the deepest in-app frame for grouping; Sentry orders frames
-// oldest-first, so the last in_app frame is the one that threw.
-func topFrame(exc map[string]any) string {
-	trace, ok := exc["stacktrace"].(map[string]any)
-	if !ok {
-		return ""
-	}
-	frames, ok := trace["frames"].([]any)
-	if !ok || len(frames) == 0 {
-		return ""
-	}
-	for i := len(frames) - 1; i >= 0; i-- {
-		frame, ok := frames[i].(map[string]any)
-		if !ok {
-			continue
-		}
-		class, _ := frame["module"].(string)
-		if class == "" {
-			class, _ = frame["filename"].(string)
-		}
-		fn, _ := frame["function"].(string)
-		if class != "" || fn != "" {
-			return class + ":" + fn
-		}
-	}
-	return ""
 }
