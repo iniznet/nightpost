@@ -1,0 +1,58 @@
+{{define "title"}}Request {{.TraceID}} — nightpost{{end}}
+{{define "heading"}}Request{{end}}
+{{define "content"}}
+{{template "perffilter" .}}
+<div class="perf">
+<p class="lead mono">trace {{.Request.TraceID}} · {{.Request.Services}} services · {{.Request.Hops}} hops · {{ms .Request.TotalMs}}</p>
+
+<section class="section">
+<h2><span class="n">1</span> Waterfall</h2>
+<p class="faint">One time axis for the whole trace: every bar is a share of the {{ms .Request.TotalMs}} the request took, so a nested span is drawn inside its parent instead of beside it.</p>
+<div class="wf">
+{{range .Request.Rows}}
+<div class="wf-row">
+  <span class="wf-name" style="padding-left:{{.Depth}}ch">{{.Name}}{{if .Service}}<span class="wf-svc">{{.Service}}</span>{{end}}</span>
+  <span class="wf-track"><span class="wf-bar{{if .Gap}} wf-gap{{end}}" style="left:{{printf "%.2f" .Left}}%;width:{{printf "%.2f" .Width}}%"></span></span>
+  <span class="wf-num">{{ms .DurationMs}}</span>
+</div>
+{{end}}
+</div>
+</section>
+
+{{if .Request.Gaps}}
+<section class="section">
+<h2><span class="n">2</span> Gaps</h2>
+<p class="faint">An outbound call whose callee recorded nothing. Each row names the service that owes the hop and the guide that tells it how to report one.</p>
+<table class="perf-table">
+<thead><tr><th scope="col">Span</th><th scope="col">Peer service</th><th scope="col" class="num">Waited</th><th scope="col">Producer guide</th></tr></thead>
+<tbody>
+{{range .Request.Rows}}{{if .Gap}}<tr class="row-gap">
+  <td class="mono">{{.Name}}</td>
+  <td class="st st-warn">{{.Peer}} · not reported</td>
+  <td class="num">{{ms .DurationMs}}</td>
+  <td><a class="mono" href="{{.Doc}}">{{.Doc}}</a></td>
+</tr>{{end}}{{end}}
+</tbody>
+</table>
+</section>
+{{end}}
+
+<section class="section">
+<h2><span class="n">3</span> Attribution</h2>
+<p class="faint">Application frames by self time across this project's profiled samples{{if .AllFrames}} — every frame, dependencies included{{else}} — <a href="{{tl .Toolbar .Path "frames" "all"}}">show dependency frames too</a>{{end}}.</p>
+{{if .Request.Frames}}
+<table class="perf-table">
+<thead><tr><th scope="col">Frame</th><th scope="col">File</th><th scope="col" class="num">Self time</th><th scope="col" class="num">Share</th></tr></thead>
+<tbody>
+{{range .Request.Frames}}<tr>
+  <td class="mono wrap">{{.Function}}</td>
+  <td class="mono wrap dim">{{if .File}}{{.File}}{{else}}no file reported{{end}}</td>
+  <td class="num em">{{ms .SelfMs}}</td>
+  <td class="num">{{frac .SharePct}}</td>
+</tr>{{end}}
+</tbody>
+</table>
+{{else}}<p class="empty">No application frame profiled for this project yet, so nothing to attribute the time to.</p>{{end}}
+</section>
+</div>
+{{end}}

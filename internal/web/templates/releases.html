@@ -1,0 +1,35 @@
+{{define "title"}}Releases — nightpost{{end}}
+{{define "heading"}}Releases{{end}}
+{{define "content"}}
+{{template "perffilter" .}}
+<div class="perf">
+<p class="lead">Which deploy is in the field, how much of the fleet it serves, and how many reader sessions it crashed. Open a release's trace to see what a request actually did.</p>
+{{if .Rows}}
+<table class="perf-table">
+<thead><tr>
+  <th scope="col">Release</th>
+  <th scope="col">First seen</th>
+  <th scope="col" class="num">Sessions</th>
+  <th scope="col" class="num">Crashed</th>
+  <th scope="col" class="num">Crash-free</th>
+  <th scope="col" class="num">Adoption</th>
+  <th scope="col">Sample request</th>
+</tr></thead>
+<tbody>
+{{range .Rows}}
+<tr>
+  <td><span class="mono">{{.Version}}</span> <span class="chip-note">{{.Project}}</span></td>
+  <td class="dim">{{rel .FirstSeen}}</td>
+  <td class="num">{{.Sessions}}</td>
+  <td class="num {{if .Crashed}}st-bad{{end}}">{{.Crashed}}</td>
+  <td class="num em {{if lt .CrashFree 0.98}}st-bad{{else}}st-ok{{end}}">{{pct01 .CrashFree}}</td>
+  <td class="num">{{pctf .Adoption}}</td>
+  <td>{{with index $.Samples .Project}}<a class="mono" href="{{tl $.Toolbar (printf "/performance/requests/%s" .)}}">trace</a>{{else}}<span class="dim">no traced request</span>{{end}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+<p class="faint">Adoption is this release's share of the sessions reported in the window. Crash-free is sessions without a <b>crashed</b> or <b>abnormal</b> outcome; a release with no beacon yet reads 100% rather than red.</p>
+{{else}}<p class="empty">No release markers in this range. A deploy marker arrives from CI, and its sessions arrive from the producer's session beacon.</p>{{end}}
+</div>
+{{end}}

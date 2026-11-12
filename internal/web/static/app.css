@@ -1,0 +1,104 @@
+/*
+  The visual system for the performance surface: tokens first, then the five
+  steps of the type scale, then the table rules every page obeys. Nothing here
+  is conditional on a client capability — the pages run with JavaScript off.
+
+  Tokens are declared on :root and this sheet is loaded last, so the palette and
+  the type scale below are the ones in play on every page. The alias block keeps
+  the earlier page markup (which spells --panel/--border/--red) on the same
+  palette instead of drifting into a second one.
+*/
+:root{
+  --bg:#0b0d10; --surface:#12161b; --line:#1f262e;
+  --text:#e6ebf0; --muted:#9aa6b2;
+  --accent:#4a9eff;
+  --ok:#3fbf7f; --warn:#e0a83c; --bad:#e0574a;
+
+  /* aliases the pre-existing templates still spell */
+  --panel:var(--surface); --panel2:#171c26;
+  --border:var(--line); --border2:#2e3744;
+  --faint:var(--muted); --accent-soft:#14283f;
+  --red:var(--bad); --yellow:var(--warn); --green:var(--ok);
+
+  /* five steps, nothing between them */
+  --t1:11px; --t2:12px; --t3:14px; --t4:15px; --t5:24px;
+
+  /* the sticky table header clears the two-line app bar */
+  --barh:92px; --rowh:40px;
+  --sans:'Segoe UI Variable Text','Segoe UI',system-ui,-apple-system,sans-serif;
+  --mono:ui-monospace,'Cascadia Code','JetBrains Mono',Menlo,Consolas,monospace;
+}
+
+/* type scale: five sizes, each with one job */
+h1{font-size:var(--t5)}
+h2{font-size:var(--t1);text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+body,.perf{font-size:var(--t3)}
+.faint,.scopeline,.flabel,.chip-note{font-size:var(--t1)}
+.dim,.mono,.chip{font-size:var(--t2)}
+.lead{font-size:var(--t4)}
+
+/* filter bar: one row, five dimensions, plain form controls */
+.perffilter{display:flex;align-items:center;gap:.45rem;flex-wrap:wrap;margin:0 0 1rem}
+.perffilter .flabel{color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+.perffilter select,.perffilter input{min-height:34px;font:var(--t3) var(--sans);color:var(--text);background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:.3rem .5rem}
+.perffilter .apply{min-height:34px}
+
+/* tables: sticky header, 40 px rows, tabular numerals right-aligned */
+.perf-table{width:100%;border-collapse:separate;border-spacing:0;display:table}
+.perf-table thead th{position:sticky;top:var(--barh);z-index:2;background:var(--surface);color:var(--muted);
+  font-size:var(--t1);font-weight:600;text-transform:uppercase;letter-spacing:.07em;text-align:left;
+  padding:0 .75rem;height:32px;border-bottom:1px solid var(--line);white-space:nowrap}
+.perf-table tbody td{height:var(--rowh);padding:0 .75rem;border-bottom:1px solid var(--line);vertical-align:middle;white-space:nowrap}
+.perf-table tbody tr:hover td{background:var(--surface)}
+.perf-table .num{text-align:right;font-variant-numeric:tabular-nums}
+/* one emphasised number per row: P95. Nothing else is allowed to shout. */
+.perf-table .em{font-weight:650;color:var(--text)}
+.perf-table .wrap{white-space:normal;min-width:24ch}
+
+/* chips: a service, a route, a hop. Colour carries status only. */
+.hops{display:inline-flex;align-items:center;gap:.3rem;flex-wrap:wrap}
+.hop-arrow{color:var(--muted)}
+.chip{display:inline-flex;align-items:center;gap:.35rem;padding:.24rem .5rem;border-radius:5px;
+  border:1px solid var(--line);background:var(--surface);color:var(--text);font-family:var(--mono)}
+.chip-svc{border-color:var(--accent);color:var(--accent);font-family:var(--sans);font-weight:600}
+.chip-err{border-color:var(--bad);color:var(--bad)}
+a.chip:hover{text-decoration:none;border-color:var(--accent)}
+.chip-note{color:var(--muted);font-family:var(--sans)}
+/* the gap: dashed, named, linked. Never blank, never a bare dash. */
+.hop-gap,.row-gap td{border-style:dashed}
+.hop-gap{border-color:var(--warn);color:var(--warn)}
+.row-gap td{background:transparent;color:var(--warn)}
+
+/* the only chart beside a number: one 40 px sparkline per row */
+.spark40{display:block}
+.spark40 polyline{fill:none;stroke:var(--accent);stroke-width:1.25;vector-effect:non-scaling-stroke}
+
+/* status marks: colour carries status, and the word is always next to it */
+.st{font-weight:600}
+.st-ok{color:var(--ok)} .st-warn{color:var(--warn)} .st-bad{color:var(--bad)}
+.cov-miss{color:var(--warn)}
+
+/* waterfall: one time axis, shared by every row */
+.wf{display:flex;flex-direction:column;gap:.15rem}
+.wf-row{display:grid;grid-template-columns:minmax(200px,28%) 1fr auto;gap:.75rem;align-items:center;min-height:28px}
+.wf-track{position:relative;height:14px;background:var(--surface);border:1px solid var(--line);border-radius:3px}
+.wf-bar{position:absolute;top:0;bottom:0;background:var(--accent);border-radius:2px;opacity:.85}
+.wf-bar.wf-gap{background:transparent;border:1px dashed var(--warn)}
+.wf-name{font-family:var(--mono);font-size:var(--t2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wf-name .wf-svc{color:var(--muted);font-family:var(--sans);font-size:var(--t1);margin-left:.4rem}
+.wf-num{font-variant-numeric:tabular-nums;text-align:right;font-size:var(--t2);color:var(--muted)}
+
+/* route detail: a section per question, numbered because the order is the walk */
+.section{margin:0 0 2rem}
+.section>h2{display:flex;align-items:baseline;gap:.5rem;border-bottom:1px solid var(--line);padding-bottom:.4rem;margin:0 0 .7rem}
+.section>h2 .n{color:var(--muted);font-variant-numeric:tabular-nums}
+.kv-row{display:flex;gap:1.5rem;flex-wrap:wrap;margin:0 0 .8rem}
+.kv-row .k{color:var(--muted);font-size:var(--t1);text-transform:uppercase;letter-spacing:.07em}
+.kv-row .v{font-size:var(--t4);font-variant-numeric:tabular-nums}
+.kv-row .v.em{font-weight:650}
+
+@media (max-width:720px){
+  :root{--barh:136px}
+  .perf-table tbody td,.perf-table thead th{padding:0 .45rem}
+  .wf-row{grid-template-columns:1fr}
+}

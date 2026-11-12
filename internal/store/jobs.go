@@ -26,6 +26,13 @@ type JobAgg struct {
 	LastOKAt    time.Time
 	LastStatus  string // ok | failed
 	LastTrace   string // run trace id of the last profiled leg (#203), '' until one lands
+	// Cron, ExpectedNextAt and GraceSeconds carry the promise the producer
+	// registered through SetJobSchedule. They are read here rather than only
+	// from the missed sweep so a healthy scheduled job can still print its
+	// schedule and its next due time.
+	Cron           string
+	ExpectedNextAt int64
+	GraceSeconds   int64
 }
 
 const jobWindowSeconds = 86400
@@ -103,7 +110,8 @@ func (s *Store) JobLeaderboard(project string, hours, limit int) ([]JobAgg, erro
 	cutoff := now - int64(hours)*3600
 	rows, err := s.rdb.Query(`SELECT project_key, kind, name, queue, runs, failures,
 		CASE WHEN fail_window_start = 0 OR ? - fail_window_start >= 86400 THEN 0 ELSE failures_24h END,
-		seconds_sum, seconds_count, last_ok_at, last_run_at, last_seconds, last_status, last_trace
+		seconds_sum, seconds_count, last_ok_at, last_run_at, last_seconds, last_status, last_trace,
+		COALESCE(schedule_cron, ''), COALESCE(next_expected_at, 0), COALESCE(grace_seconds, 0)
 		FROM job_stats
 		WHERE (? = '' OR project_key = ?) AND last_run_at >= ?
 		ORDER BY last_run_at DESC LIMIT ?`,
@@ -119,7 +127,8 @@ func (s *Store) JobLeaderboard(project string, hours, limit int) ([]JobAgg, erro
 		var sum float64
 		var count int64
 		if err := rows.Scan(&j.ProjectKey, &j.Kind, &j.Name, &j.Queue, &j.Runs, &j.Failures,
-			&j.Failures24h, &sum, &count, &lastOK, &lastRun, &j.LastMs, &j.LastStatus, &j.LastTrace); err != nil {
+			&j.Failures24h, &sum, &count, &lastOK, &lastRun, &j.LastMs, &j.LastStatus, &j.LastTrace,
+			&j.Cron, &j.ExpectedNextAt, &j.GraceSeconds); err != nil {
 			return nil, err
 		}
 		j.LastMs *= 1000

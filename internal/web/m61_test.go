@@ -95,7 +95,10 @@ func TestLegacyRoutesServeConsolidatedContent(t *testing.T) {
 
 	// The five performance tab paths merged into one page (#656). A bookmark
 	// must land on the merged index with its scope, never on a 404.
-	for _, legacy := range []string{"/profiles?project=backend&type=request", "/traces?project=backend", "/slowest?project=backend", "/queries?project=backend", "/jobs?project=backend"} {
+	// /jobs stopped being a tab of the merged index: it is its own page with its
+	// own subject (schedule, last run, expected next, missed), so only the four
+	// surfaces that dissolved still redirect.
+	for _, legacy := range []string{"/profiles?project=backend&type=request", "/traces?project=backend", "/slowest?project=backend", "/queries?project=backend"} {
 		client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 		resp, err := client.Get(srv.URL + legacy)
 		if err != nil {

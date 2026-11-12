@@ -1,0 +1,37 @@
+{{define "title"}}Jobs — nightpost{{end}}
+{{define "heading"}}Jobs{{end}}
+{{define "content"}}
+{{template "perffilter" .}}
+<div class="perf">
+<p class="lead">What runs, on what schedule, when it last ran, when it is next due, and whether the run that was promised ever arrived.</p>
+{{if .Rows}}
+<table class="perf-table">
+<thead><tr>
+  <th scope="col">Job</th>
+  <th scope="col">Kind</th>
+  <th scope="col">Schedule</th>
+  <th scope="col" class="num">Runs</th>
+  <th scope="col" class="num">Failures</th>
+  <th scope="col">Last run</th>
+  <th scope="col">Expected next</th>
+  <th scope="col">Status</th>
+</tr></thead>
+<tbody>
+{{range .Rows}}
+<tr{{if eq .Status "missed"}} class="row-gap"{{end}}>
+  <td><span class="mono">{{.Name}}</span> <span class="chip-note">{{.Project}}</span></td>
+  <td class="dim">{{.Kind}}{{if .Queue}} · {{.Queue}}{{end}}</td>
+  <td class="mono">{{if .Cron}}{{.Cron}}{{else if .ExpectedNext}}<span class="dim">scheduled</span>{{else}}<span class="dim">registered by run</span>{{end}}</td>
+  <td class="num">{{.Runs}}</td>
+  <td class="num {{if .Failures}}st-bad{{end}}">{{.Failures}}</td>
+  <td class="dim">{{if .LastRun.IsZero}}never{{else}}{{rel .LastRun}}{{end}}</td>
+  <td class="dim">{{if .ExpectedNext.IsZero}}<span class="dim">not registered</span>{{else}}{{when .ExpectedNext}}{{end}}</td>
+  <td>{{if eq .Status "missed"}}<span class="st st-bad">missed</span>{{else if eq .Status "failed"}}<span class="st st-warn">failed</span>{{else}}<span class="st st-ok">ok</span>{{end}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+<p class="faint">A missed run is stamped by the ticker when the promise plus its own grace window passes without a run. A job that stops reporting stays on this page: the row is kept by the absence, not by the heartbeat.</p>
+{{else}}<p class="empty">No job telemetry in this range. Turn on job capture on a producer and it will name its schedule here.</p>{{end}}
+</div>
+{{end}}

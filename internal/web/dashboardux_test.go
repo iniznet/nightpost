@@ -3,7 +3,7 @@ package web
 import (
 	"fmt"
 	"net/http"
-	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -50,39 +50,37 @@ func TestCollapseNotFound(t *testing.T) {
 	}
 }
 
-func TestPerformanceIndexAndRouteDrilldown(t *testing.T) {
+// The performance surface moved from a merged index plus tabs to a journey-first
+// page and an id-addressed route detail (journeys increment). This test follows
+// the pages: the routes index ranks a route and names who calls it, and the
+// drill-down renders the six sections for one route only.
+func TestPerfRoutesIndexAndDrilldown(t *testing.T) {
 	srv, st := newTestServer(t)
-	for _, n := range []string{"GET /a", "GET /a", "GET /a", "GET /b"} {
-		if _, err := st.RecordProfile(store.ProfileInput{
-			ProjectKey: "backend", Type: store.ProfileTypeRequest, Name: n, DurationMs: 100,
-		}); err != nil {
-			t.Fatalf("seed: %v", err)
-		}
-	}
+	fx := seedPerf(t, st, "gap")
 
-	// The merged index ranks routes and says when no second leg arrived.
-	resp, err := http.Get(srv.URL + "/performance?project=backend")
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := readAll(t, resp)
-	for _, want := range []string{"GET /a", "p95", "not received", "Traced"} {
+	body := readAll(t, mustGet(t, srv.URL+"/performance/routes?project=demo"))
+	for _, want := range []string{"P95", "/api/home", "Called by", "Coverage"} {
 		if !strings.Contains(body, want) {
-			t.Errorf("performance index missing %q", want)
+			t.Errorf("routes index missing %q", want)
 		}
 	}
 
-	// The drill-down walks one route only, and names the gap explicitly.
-	resp, err = http.Get(srv.URL + "/performance/route?project=backend&route=" + url.QueryEscape("GET /a"))
-	if err != nil {
-		t.Fatal(err)
+	id := strconv.FormatInt(fx.FrontRoute, 10)
+	body = readAll(t, mustGet(t, srv.URL+"/performance/routes/"+id+"?project=demo"))
+	for _, want := range []string{
+		"Distribution", "Journeys through it", "Slowest samples", "Queries", "Jobs", "Errors", "hop 1",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("route detail missing section %q", want)
+		}
 	}
-	body = readAll(t, resp)
-	if !strings.Contains(body, "Request walk") {
-		t.Errorf("route detail missing the walk: %.300s", body)
+	// The detail is one route: the heading names it, and the chain that walks
+	// through it is shown as a chain, not as two competing detail pages.
+	if !strings.Contains(body, "<title>/ — nightpost</title>") {
+		t.Errorf("route detail is not titled for its own route: %.300s", body)
 	}
-	if strings.Contains(body, "GET /b") {
-		t.Errorf("route detail leaked another route: %.300s", body)
+	if strings.Count(body, "Distribution") != 1 {
+		t.Errorf("route detail rendered more than one distribution section")
 	}
 }
 

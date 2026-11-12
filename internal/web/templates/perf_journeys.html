@@ -1,0 +1,39 @@
+{{define "title"}}Journeys — nightpost{{end}}
+{{define "heading"}}Journeys{{end}}
+{{define "content"}}
+{{template "perffilter" .}}
+<div class="perf">
+<p class="lead">Every end-to-end path in scope, ranked by what it costs the reader. A row is one journey: the entry that started it, the hops it walked, and the one number worth emphasising — its p95.</p>
+{{if .Rows}}
+<table class="perf-table">
+<thead><tr>
+  <th scope="col">Entry</th>
+  <th scope="col">Hop chain</th>
+  <th scope="col" class="num">Requests</th>
+  <th scope="col" class="num">P95</th>
+  <th scope="col" class="num">P50</th>
+  <th scope="col">Slowest hop</th>
+  <th scope="col" class="num">Coverage</th>
+  <th scope="col">p95 by hop</th>
+</tr></thead>
+<tbody>
+{{range .Rows}}
+<tr>
+  <td class="wrap"><span class="chip chip-svc">{{if .EntryService}}{{.EntryService}}{{else}}unknown service{{end}}</span>
+    {{if .RouteID}}<a class="mono" href="{{tl $.Toolbar (printf "/performance/routes/%d" .RouteID)}}">{{.Entry}}</a>{{else}}<span class="mono">{{.Entry}}</span>{{end}}
+    <span class="chip-note">{{.EntryKind}}</span></td>
+  <td>{{template "hopchain" .Hops}}</td>
+  <td class="num">{{.Requests}}</td>
+  <td class="num em">{{ms .P95Ms}}</td>
+  <td class="num">{{ms .P50Ms}}</td>
+  <td>{{if .Slowest.Label}}<span class="mono">{{.Slowest.Label}}</span> <span class="num dim">{{frac .Slowest.SharePct}} of p95</span>{{else}}<span class="dim">no hop reported</span>{{end}}</td>
+  <td class="num">{{if .Total}}<span class="{{if ge .Covered .Total}}{{else}}cov-miss{{end}}">{{.Coverage}}</span>{{else}}<span class="dim">no hops</span>{{end}}</td>
+  <td>{{if .Spark}}<svg class="spark40" width="40" height="16" viewBox="0 0 40 16" role="img" aria-label="p95 of each hop"><polyline points="{{spark40 .Spark}}"/></svg>{{else}}<span class="dim">one hop</span>{{end}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+<p class="faint">Coverage is reported hops over expected hops: <b>3/3</b> means every service in the chain answered. A dashed chip is a hop the callee never reported — open it for the producer guide.</p>
+{{else}}<p class="empty">No journeys in this range. A journey is materialised from spans, so a producer that only sends errors and profiles has no chain here yet. <a href="/keys">Copy the project key</a> and turn on span reporting.</p>{{end}}
+</div>
+{{end}}

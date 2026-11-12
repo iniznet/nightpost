@@ -112,6 +112,48 @@ func (t toolbar) Link(path string, extra url.Values) string {
 	return path + "?" + v.Encode()
 }
 
+// --- performance filter bar ------------------------------------------------
+//
+// The six performance pages share one filter bar, and it is one dimension
+// wider than the site toolbar: a chain can be narrowed to a service (a hop
+// owner) and to an entry kind (a page a browser rendered, or an API a server
+// answered). Re-typed per page, the bar drifts and a link silently drops a
+// dimension — the guard parseToolbar already exists for.
+
+// perfFilter is the filter bar's state: the persistent toolbar plus the two
+// dimensions only the performance surface offers.
+type perfFilter struct {
+	toolbar
+	Service string
+	Entry   string
+}
+
+// entrySpec is one entry-kind option. The empty key is "all", so the absent
+// param is the unfiltered ask rather than a third kind.
+type entrySpec struct {
+	Key   string
+	Label string
+}
+
+// entrySpecs is the entry dialect; store.EntryKind* names the two real kinds.
+var entrySpecs = []entrySpec{
+	{Key: "", Label: "all entries"},
+	{Key: "page", Label: "page"},
+	{Key: "api", Label: "api"},
+}
+
+// parsePerfFilter reads the filter bar. An unknown entry resolves to "all"
+// rather than erroring, matching the range dialect: every page renders with
+// zero params and with nonsense params alike.
+func parsePerfFilter(q url.Values) perfFilter {
+	f := perfFilter{toolbar: parseToolbar(q), Service: strings.TrimSpace(q.Get("service"))}
+	switch entry := strings.TrimSpace(q.Get("entry")); entry {
+	case "api", "page":
+		f.Entry = entry
+	}
+	return f
+}
+
 // toolbarLink is the template-facing form of toolbar.Link: kv is a flat
 // alternating key/value list so templates can build a link in one expression.
 func toolbarLink(t toolbar, path string, kv ...string) string {
