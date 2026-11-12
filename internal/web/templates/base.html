@@ -273,6 +273,17 @@ summary::marker{color:var(--faint)}
 </nav>
 {{end}}
 
+{{/* Performance keeps one merged view (#656) and two sibling pages: a statement
+     shape and a queue drain outlive any single route, so they answer on their
+     own surface rather than as a block inside a route walk (#658). */}}
+{{define "tabsPerf"}}
+<nav class="tabs" aria-label="Performance tabs">
+  <a href="{{tl .Toolbar "/performance"}}" class="tab"{{if eq .Page "performance"}} aria-current="page"{{end}}>Overview</a>
+  <a href="{{tl .Toolbar "/queries"}}" class="tab"{{if eq .Page "queries"}} aria-current="page"{{end}}>Queries</a>
+  <a href="{{tl .Toolbar "/jobs"}}" class="tab"{{if eq .Page "jobs"}} aria-current="page"{{end}}>Jobs</a>
+</nav>
+{{end}}
+
 {{define "tabsConfigure"}}
 <nav class="tabs" aria-label="Configure tabs">
   <a href="{{tl .Toolbar "/keys"}}" class="tab"{{if eq .Page "keys"}} aria-current="page"{{end}}>Keys</a>

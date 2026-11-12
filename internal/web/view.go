@@ -415,23 +415,23 @@ func journeyHasService(row JourneyRow, service string) bool {
 // journeys walk it, whether they reported every hop) come from the materialised
 // journeys, so a route that arrived through traces is still visible.
 type RouteRow struct {
-	RouteID   int64
-	Service   string
-	Project   string
-	Pattern   string
-	Method    string
-	Requests  int64
-	P50Ms     float64
-	P95Ms     float64
-	MaxMs     float64
-	TotalMs   float64
-	CalledBy  []string
-	Calls     int64
-	Covered   int64
-	Expected  int64
-	Coverage  string
-	Profiled  bool
-	HopP95Ms  float64
+	RouteID  int64
+	Service  string
+	Project  string
+	Pattern  string
+	Method   string
+	Requests int64
+	P50Ms    float64
+	P95Ms    float64
+	MaxMs    float64
+	TotalMs  float64
+	CalledBy []string
+	Calls    int64
+	Covered  int64
+	Expected int64
+	Coverage string
+	Profiled bool
+	HopP95Ms float64
 }
 
 type routeAcc struct {
@@ -809,6 +809,9 @@ type JobRow struct {
 	Failures     int64
 	LastRun      time.Time
 	LastMs       float64
+	AvgMs        float64
+	Failures24h  int64
+	LastTrace    string
 	Cron         string
 	ExpectedNext time.Time
 	GraceSeconds int64
@@ -832,6 +835,7 @@ func buildJobRows(jobs []store.JobAgg, missed []store.MissedJob) []JobRow {
 		row := JobRow{
 			Project: j.ProjectKey, Kind: j.Kind, Name: j.Name, Queue: j.Queue,
 			Runs: j.Runs, Failures: j.Failures, LastRun: j.LastRunAt, LastMs: j.LastMs,
+			AvgMs: j.AvgMs, Failures24h: j.Failures24h, LastTrace: j.LastTrace,
 			Cron: j.Cron, GraceSeconds: j.GraceSeconds,
 			Status: "ok",
 		}
@@ -887,4 +891,3 @@ func sparkBox(points []float64, w, h float64) string {
 	}
 	return strings.Join(pts, " ")
 }
-

@@ -206,6 +206,10 @@ var (
 	relClockRe  = regexp.MustCompile("(just now|in <1m|in [0-9]+[mhd]|[0-9]+[mhd] ago)")
 	dbSizeRe    = regexp.MustCompile("[0-9]+[.][0-9] MB")
 	routeHrefRe = regexp.MustCompile("/performance/routes/[0-9]+")
+	// The jobs table stamps an exact wall clock into a title attribute. Without
+	// this the golden pins the minute the suite happened to run and fails on the
+	// next one, which is the defect the helper exists to prevent.
+	stampRe = regexp.MustCompile(`title="[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}"`)
 )
 
 // normaliseGolden rewrites the values that legitimately differ between two runs
@@ -216,6 +220,7 @@ func normaliseGolden(body string) string {
 	body = relClockRe.ReplaceAllString(body, "T")
 	body = dbSizeRe.ReplaceAllString(body, "SIZE")
 	body = routeHrefRe.ReplaceAllString(body, "/performance/routes/RID")
+	body = stampRe.ReplaceAllString(body, `title="STAMP"`)
 	return body
 }
 

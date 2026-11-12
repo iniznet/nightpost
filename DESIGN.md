@@ -82,8 +82,12 @@ and SQL: a service name is prose, not code. No size exists outside this list.
    destinations, because a data surface and a config surface are different jobs.
 2. **Tab** — underline, inside the page head, below the `h1`. Errors:
    Exceptions | Logs. Configure: Keys | Organisations | Settings.
-   **Performance has no tab level at all**: its Overview / Queries / Jobs tabs
-   dissolved into sections of a route detail, and each page answers one question.
+   Performance: Journeys | Routes | Queries | Jobs. A route detail carries its
+   own sections (Distribution, Journeys through it, Slowest samples, Queries,
+   Jobs, Errors) so a reader walks from "this page is slow" to "this step is
+   slow" without leaving the subject. A statement shape and a queue drain
+   outlive any one route, so Queries and Jobs keep pages of their own
+   (tracker #658). Each page answers one question.
 3. **Page** — the `h1`, plus the scope line.
 
 A level never borrows another level's mark. The active state is `aria-current`,
