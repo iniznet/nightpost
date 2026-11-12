@@ -137,6 +137,7 @@ func main() {
 
 	go retentionLoop(st, *retentionDays, *pruneInterval)
 	go budgetLoop(st, sh, *ingestRate, *ingestBurst)
+	go derivedLoop(st)
 
 	mux := http.NewServeMux()
 	// route order: coarse guard → key gate → per-project shaper →
@@ -390,6 +391,46 @@ func pruneMinutes(d time.Duration) int {
 		m = 1
 	}
 	return m
+}
+
+const (
+	// journeysEvery is the cadence of the derived layer: journeys are materialised
+	// from spans, and missed scheduled runs are stamped, on the same tick.
+	journeysEvery = 5 * time.Minute
+	// journeysTrailing is the span window one pass covers. It is deliberately
+	// WIDER than the tick: a pass that fails, or a tick that slips, then leaves no
+	// hole in the materialised data, because the next pass re-reads the overlap.
+	journeysTrailing = 15 * time.Minute
+)
+
+// derivedLoop runs the derived layer once at boot and then on journeysEvery. It
+// owns both halves because they read the same image of the last few minutes:
+// journeys describe how a request travelled, the missed sweep describes the work
+// that never started, and a reader comparing the two must not see one lag the
+// other by a tick.
+func derivedLoop(st *store.Store) {
+	runOnce := func() {
+		now := time.Now()
+		if err := st.RecomputeJourneys(now.Add(-journeysTrailing), now); err != nil {
+			log.Printf("journeys: recompute: %v", err)
+		}
+		missed, err := st.MarkMissedJobs(now)
+		if err != nil {
+			log.Printf("jobs: missed sweep: %v", err)
+			return
+		}
+		if len(missed) > 0 {
+			// The missed_run rule fires off these stamps on the next dispatcher
+			// tick; the log line is what tells an operator the sweep ran at all.
+			log.Printf("jobs: %d scheduled run(s) missed", len(missed))
+		}
+	}
+	runOnce()
+	t := time.NewTicker(journeysEvery)
+	defer t.Stop()
+	for range t.C {
+		runOnce()
+	}
 }
 
 // ingestBudgetRefresh bounds how long a saved ingest_rate/ingest_burst can sit

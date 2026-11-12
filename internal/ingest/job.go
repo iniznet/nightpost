@@ -24,6 +24,13 @@ type jobPayload struct {
 	// producer keeps working and its run is labelled with the project key.
 	Service string `json:"service"`
 	Env     string `json:"env"`
+	// ScheduleCron and NextExpectedAt carry the promise a scheduled run makes.
+	// The producer states the next expected fire time instead of the server
+	// parsing cron: a parser is a dependency the single-binary rule cannot
+	// pay for, and every supported producer already knows its own schedule.
+	ScheduleCron   string `json:"schedule_cron"`
+	NextExpectedAt int64  `json:"next_expected_at"`
+	GraceSeconds   int64  `json:"grace_seconds"`
 	// Trace is the per-run trace id of the last profiled leg ; it is
 	// random hex minted by the producer, never user-derived, so it carries
 	// no reader data across this boundary.
@@ -98,6 +105,11 @@ func JobHandler(st *store.Store) http.HandlerFunc {
 			captureRaw(st, project, "job", body, false, "store: "+err.Error())
 			http.Error(w, "record job: "+err.Error(), http.StatusInternalServerError)
 			return
+		}
+		if p.NextExpectedAt > 0 {
+			if err := st.SetJobSchedule(project, kind, p.Name, strings.TrimSpace(p.ScheduleCron), p.NextExpectedAt, p.GraceSeconds); err != nil {
+				d.issue("next_expected_at", err.Error())
+			}
 		}
 		captureRaw(st, project, "job", body, true, "")
 		w.WriteHeader(http.StatusAccepted)

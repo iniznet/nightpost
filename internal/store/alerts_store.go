@@ -82,11 +82,16 @@ func (s *Store) PruneAlertsBefore(cutoff int64, chunk int) (int64, error) {
 }
 
 // NewIssueEvents lists error issues first seen after the cutoff.
+//
+// merged_into = 0 is the same fold the issue list applies: a merged duplicate is
+// not a defect of its own, and reading it here made a rule alert on a row the
+// list collapses — the operator saw an alert for an issue the dashboard refused
+// to show them.
 func (s *Store) NewIssueEvents(since int64, projects []string) ([]IssueEvent, error) {
 	clause, args := projectClause(projects)
 	q := append([]any{since}, args...)
 	rows, err := s.rdb.Query(`SELECT id, project_key, fingerprint, title, first_seen_at FROM issues
-		WHERE type = 'error' AND resolved = 0 AND first_seen_at >= ?`+clause+`
+		WHERE type = 'error' AND resolved = 0 AND merged_into = 0 AND first_seen_at >= ?`+clause+`
 		ORDER BY first_seen_at DESC LIMIT 10`, q...)
 	if err != nil {
 		return nil, err
@@ -102,7 +107,7 @@ func (s *Store) Regressions(projects []string) ([]IssueEvent, error) {
 	clause, args := projectClause(projects)
 	q := append([]any{}, args...)
 	rows, err := s.rdb.Query(`SELECT id, project_key, fingerprint, title, last_seen_at FROM issues
-		WHERE resolved = 1 AND resolved_at > 0 AND last_seen_at > resolved_at`+clause+`
+		WHERE resolved = 1 AND resolved_at > 0 AND merged_into = 0 AND last_seen_at > resolved_at`+clause+`
 		ORDER BY last_seen_at DESC LIMIT 10`, q...)
 	if err != nil {
 		return nil, err
@@ -144,7 +149,7 @@ func (s *Store) CountBreaches(since, threshold int64, projects []string) ([]Coun
 	q = append(q, threshold)
 	rows, err := s.rdb.Query(`SELECT i.project_key, i.fingerprint, i.title, COUNT(*) n
 		FROM occurrences o JOIN issues i ON i.id = o.issue_id
-		WHERE o.seen_at >= ? AND i.resolved = 0`+clause+`
+		WHERE o.seen_at >= ? AND i.resolved = 0 AND i.merged_into = 0`+clause+`
 		GROUP BY i.id, i.project_key, i.fingerprint, i.title
 		HAVING n >= ? ORDER BY n DESC LIMIT 10`, q...)
 	if err != nil {

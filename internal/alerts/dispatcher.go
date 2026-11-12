@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -27,9 +28,10 @@ type Event struct {
 }
 
 // Dispatcher evaluates rules on a tick and fans matched events out to the
-// rule's channels under per-target cooldowns and per-channel caps. A send
-// failure records nothing, so the same match is retried next tick; a
-// success starts the cooldown clock — exactly-once-per-window semantics.
+// rule's channels under a per-(rule, target) cooldown and per-channel caps. A
+// success starts the cooldown clock, which is what makes an alert exactly-once
+// per window; a failure records nothing, so the target is retried once the
+// window lapses.
 type Dispatcher struct {
 	st        *store.Store
 	cfg       *Config
@@ -40,15 +42,7 @@ type Dispatcher struct {
 }
 
 func NewDispatcher(st *store.Store, cfg *Config, cfgPath string) *Dispatcher {
-	d := &Dispatcher{st: st, cfg: cfg, cfgPath: cfgPath, Senders: map[string]Sender{}, startedAt: time.Now()}
-	for _, ch := range cfg.Channels {
-		switch ch.Type {
-		case "discord":
-			d.Senders[ch.ID] = &Discord{Webhook: ch.Webhook}
-		case "email":
-			d.Senders[ch.ID] = &Email{Cfg: ch}
-		}
-	}
+	d := &Dispatcher{st: st, cfg: cfg, cfgPath: cfgPath, Senders: sendersFor(cfg), startedAt: time.Now()}
 	if cfgPath != "" {
 		if fi, err := os.Stat(cfgPath); err == nil {
 			d.mtime = fi.ModTime()
@@ -91,15 +85,30 @@ func (d *Dispatcher) reloadIfChanged() {
 	}
 	d.cfg = cfg
 	d.mtime = fi.ModTime()
+	d.Senders = sendersFor(cfg)
+	log.Printf("alerts: config reloaded (%d channels, %d rules)", len(cfg.Channels), len(cfg.Rules))
+}
+
+// sendersFor builds one sender per configured channel. Boot and reload share it,
+// so a hot-reloaded config can never gain a channel type the boot path knows and
+// the reload path forgot.
+func sendersFor(cfg *Config) map[string]Sender {
+	senders := make(map[string]Sender, len(cfg.Channels))
 	for _, ch := range cfg.Channels {
 		switch ch.Type {
 		case "discord":
-			d.Senders[ch.ID] = &Discord{Webhook: ch.Webhook}
+			senders[ch.ID] = &Discord{Webhook: ch.Webhook}
 		case "email":
-			d.Senders[ch.ID] = &Email{Cfg: ch}
+			senders[ch.ID] = &Email{Cfg: ch}
+		case "slack":
+			senders[ch.ID] = &Slack{Webhook: ch.Webhook}
+		case "telegram":
+			senders[ch.ID] = &Telegram{Token: ch.BotToken, ChatID: ch.ChatID, APIBase: ch.APIBase}
+		case "webhook":
+			senders[ch.ID] = &Webhook{URL: ch.Webhook}
 		}
 	}
-	log.Printf("alerts: config reloaded (%d channels, %d rules)", len(cfg.Channels), len(cfg.Rules))
+	return senders
 }
 
 // Tick evaluates every rule once and dispatches fresh events. Exported
@@ -108,20 +117,27 @@ func (d *Dispatcher) Tick(now time.Time) []Event {
 	var sent []Event
 	for _, r := range d.cfg.Rules {
 		for _, ev := range d.evaluate(r, now) {
+			// The cooldown is per (rule, target), so it is decided ONCE per event,
+			// before the fan-out. Checking it inside the channel loop let the first
+			// channel's own send record the window and then silence every channel
+			// after it — a second channel received nothing, ever.
+			if !d.cooledDown(r, ev, now) {
+				continue
+			}
+			msg := ev.Title + "\n" + ev.Body
+			if d.cfg.BaseURL != "" && ev.Link != "" {
+				msg += "\n" + d.cfg.BaseURL + ev.Link
+			}
 			for _, chID := range r.Channels {
-				if !d.allowed(r, ev, chID, now) {
+				if !d.channelAllows(chID, ev, now) {
 					continue
 				}
 				sender := d.Senders[chID]
 				if sender == nil {
 					continue
 				}
-				msg := ev.Title + "\n" + ev.Body
-				if d.cfg.BaseURL != "" && ev.Link != "" {
-					msg += "\n" + d.cfg.BaseURL + ev.Link
-				}
 				if err := sender.Send(ev.Title, msg); err != nil {
-					log.Printf("alerts: send to %q failed (will retry next tick): %v", chID, err)
+					log.Printf("alerts: send to %q failed (retried once the window lapses): %v", chID, err)
 					continue
 				}
 				if err := d.st.RecordAlert(chID, ev.Rule, ev.TargetKey, now.Unix()); err != nil {
@@ -134,16 +150,19 @@ func (d *Dispatcher) Tick(now time.Time) []Event {
 	return sent
 }
 
-// allowed applies per-target cooldown then per-channel caps.
-func (d *Dispatcher) allowed(r Rule, ev Event, chID string, now time.Time) bool {
+// cooledDown is the per-(rule, target) window from the alerts_log ledger.
+func (d *Dispatcher) cooledDown(r Rule, ev Event, now time.Time) bool {
 	last, err := d.st.LastAlertSent(ev.Rule, ev.TargetKey)
 	if err != nil {
 		log.Printf("alerts: cooldown lookup: %v", err)
 		return false
 	}
-	if now.Unix()-last < int64(r.cooldownMinutes())*60 {
-		return false
-	}
+	return now.Unix()-last >= int64(r.cooldownMinutes())*60
+}
+
+// channelAllows applies one channel's hourly cap and daily ceiling. The event is
+// passed only so the drop is logged with the rule and target that lost it.
+func (d *Dispatcher) channelAllows(chID string, ev Event, now time.Time) bool {
 	ch := d.cfg.Channel(chID)
 	if ch == nil {
 		return false
@@ -244,6 +263,102 @@ func (d *Dispatcher) evaluate(r Rule, now time.Time) []Event {
 			out = append(out, Event{Rule: r.Type, TargetKey: p + "|" + r.Command,
 				Title: fmt.Sprintf("Heartbeat stale in %s: %s", p, trunc(r.Command, 100)),
 				Body:  body, Link: "/jobs?project=" + p})
+		}
+		return out
+	case "missed_run":
+		rows, err := d.st.MissedJobs(r.Projects)
+		if err != nil {
+			log.Printf("alerts: missed_run eval: %v", err)
+			return nil
+		}
+		out := make([]Event, 0, len(rows))
+		for _, m := range rows {
+			out = append(out, Event{Rule: r.Type, TargetKey: m.ProjectKey + "|" + m.Kind + "|" + m.Name,
+				Title: fmt.Sprintf("Missed run in %s: %s", m.ProjectKey, trunc(m.Name, 100)),
+				Body: fmt.Sprintf("expected at %s (+%ds grace), last run %ds ago",
+					time.Unix(m.ExpectedAt, 0).UTC().Format(time.RFC3339), m.GraceSeconds, now.Unix()-m.LastRunAt),
+				Link: "/jobs?project=" + url.QueryEscape(m.ProjectKey)})
+		}
+		return out
+	case "query_slow":
+		rows, err := d.st.SlowQueries(now.Add(-time.Duration(r.windowMinutes())*time.Minute).Unix(), r.ThresholdMs, r.Projects)
+		if err != nil {
+			log.Printf("alerts: query_slow eval: %v", err)
+			return nil
+		}
+		out := make([]Event, 0, len(rows))
+		for _, q := range rows {
+			out = append(out, Event{Rule: r.Type, TargetKey: q.ProjectKey + "|" + q.Fingerprint,
+				Title: fmt.Sprintf("Slow query %.0fms in %s", q.MaxMs, q.ProjectKey),
+				Body:  fmt.Sprintf("%s ran %d times, worst %.0fms inside the last %dm.", trunc(q.SQL, 200), q.Count, q.MaxMs, r.windowMinutes()),
+				Link:  "/queries?project=" + url.QueryEscape(q.ProjectKey)})
+		}
+		return out
+	case "span_unreported":
+		rows, err := d.st.UnreportedJourneys(now.Add(-time.Duration(r.windowMinutes())*time.Minute).Unix(), r.Projects)
+		if err != nil {
+			log.Printf("alerts: span_unreported eval: %v", err)
+			return nil
+		}
+		out := make([]Event, 0, len(rows))
+		for _, g := range rows {
+			coverage := 0.0
+			if g.Hops > 0 {
+				coverage = float64(g.Hops-g.Unreported) / float64(g.Hops) * 100
+			}
+			out = append(out, Event{Rule: r.Type, TargetKey: g.ProjectKey + "|" + g.PatternKey,
+				Title: fmt.Sprintf("Unreported hop in %s: %s", g.ProjectKey, trunc(g.EntryPattern, 100)),
+				Body:  fmt.Sprintf("%d of %d hops reported nothing on this path; coverage %.0f%%.", g.Unreported, g.Hops, coverage),
+				Link:  "/performance?project=" + url.QueryEscape(g.ProjectKey)})
+		}
+		return out
+	case "release_regression":
+		points := r.Points
+		if points <= 0 {
+			points = 3
+		}
+		drop := r.DropPoints
+		if drop <= 0 {
+			drop = 5
+		}
+		rows, err := d.st.ReleaseCrashPoints(r.Projects, points+1)
+		if err != nil {
+			log.Printf("alerts: release_regression eval: %v", err)
+			return nil
+		}
+		// The store returns newest-first per project, so the baseline is the rows
+		// after the head; a project with fewer than points+1 releases has no
+		// baseline to compare against and stays silent rather than firing on the
+		// first deploy it ever sees.
+		byProject := map[string][]store.ReleaseCrashPoint{}
+		for _, p := range rows {
+			byProject[p.ProjectKey] = append(byProject[p.ProjectKey], p)
+		}
+		projects := make([]string, 0, len(byProject))
+		for key := range byProject {
+			projects = append(projects, key)
+		}
+		sort.Strings(projects)
+		var out []Event
+		for _, project := range projects {
+			releases := byProject[project]
+			if len(releases) < points+1 {
+				continue
+			}
+			latest := releases[0]
+			baseline := 0.0
+			for _, prev := range releases[1 : points+1] {
+				baseline += prev.CrashFree
+			}
+			baseline /= float64(points)
+			if latest.CrashFree*100 > baseline*100-drop {
+				continue
+			}
+			out = append(out, Event{Rule: r.Type, TargetKey: project + "|" + latest.Version,
+				Title: fmt.Sprintf("Crash-free down in %s: %s", project, trunc(latest.Version, 60)),
+				Body: fmt.Sprintf("release %s is %.1f%% crash-free against a %.1f%% baseline over the previous %d release(s).",
+					latest.Version, latest.CrashFree*100, baseline*100, points),
+				Link: "/releases?project=" + url.QueryEscape(project)})
 		}
 		return out
 	case "p95-latency":
