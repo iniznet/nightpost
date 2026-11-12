@@ -293,6 +293,8 @@ type server struct {
 	routePage   *template.Template
 	profile     *template.Template
 	trace       *template.Template
+	queries     *template.Template
+	jobs        *template.Template
 	keys        *template.Template
 	orgs        *template.Template
 	settings    *template.Template
@@ -701,6 +703,8 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *A
 		routePage:   mustLayout("route.html"),
 		profile:     mustLayout("profile.html"),
 		trace:       mustLayout("trace.html"),
+		queries:     mustLayout("queries.html"),
+		jobs:        mustLayout("jobs.html"),
 		keys:        mustLayout("keys.html"),
 		orgs:        mustLayout("orgs.html"),
 		settings:    mustLayout("settings.html"),
@@ -740,7 +744,9 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *A
 	page.HandleFunc("GET /performance/route", s.handleRouteDetail)
 	page.HandleFunc("GET /profiles/{id}", s.handleProfileDetail)
 	page.HandleFunc("GET /traces/{id}", s.handleTraceDetail)
-	for _, legacy := range []string{"/profiles", "/traces", "/slowest", "/queries", "/jobs"} {
+	page.HandleFunc("GET /queries", s.handleQueries)
+	page.HandleFunc("GET /jobs", s.handleJobs)
+	for _, legacy := range []string{"/profiles", "/traces", "/slowest"} {
 		page.HandleFunc("GET "+legacy, s.perfRedirect)
 	}
 	page.HandleFunc("GET /orgs", s.handleOrgs)
@@ -1089,12 +1095,6 @@ func (s *server) handlePerformance(w http.ResponseWriter, r *http.Request) {
 	}
 	data["Rows"] = rows
 	data["MaxTotal"] = maxTotal
-	if q, qerr := s.st.QueryLeaderboard(t.Project, t.Hours(), 10); qerr == nil {
-		data["Queries"] = q
-	}
-	if j, jerr := s.st.JobLeaderboard(t.Project, t.Hours(), 10); jerr == nil {
-		data["Jobs"] = j
-	}
 	if err := s.performance.ExecuteTemplate(w, "layout", data); err != nil {
 		log.Printf("render performance: %v", err)
 	}
@@ -1248,9 +1248,6 @@ func (s *server) handleRouteDetail(w http.ResponseWriter, r *http.Request) {
 	data["Traces"] = traces
 	data["Hotspots"] = hotspots
 	data["MaxSelf"] = maxSelf
-	if q, qerr := s.st.QueryLeaderboard(row.Project, t.Hours(), 10); qerr == nil {
-		data["Queries"] = q
-	}
 	if err := s.routePage.ExecuteTemplate(w, "layout", data); err != nil {
 		log.Printf("render route: %v", err)
 	}
@@ -1326,6 +1323,59 @@ func (s *server) handleTraceDetail(w http.ResponseWriter, r *http.Request) {
 	data["TraceID"] = id
 	if err := s.trace.ExecuteTemplate(w, "layout", data); err != nil {
 		log.Printf("render trace: %v", err)
+	}
+}
+
+// handleQueries is its own page, not a Performance detail: a statement shape
+// outlives one route, so the reader asks "what statement costs the most" on a
+// surface of its own (tracker #658).
+func (s *server) handleQueries(w http.ResponseWriter, r *http.Request) {
+	t := parseToolbar(r.URL.Query())
+	data := s.baseData(r, t, PageQueries)
+	aggs, err := s.st.QueryLeaderboard(t.Project, t.Hours(), 50)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	type QueryRow struct {
+		SQL, Fingerprint string
+		Connection       string
+		Count            int64
+		TotalMs, AvgMs   float64
+		MaxMs            float64
+		LastSeen         time.Time
+	}
+	rows := make([]QueryRow, 0, len(aggs))
+	var maxTotal float64
+	for _, a := range aggs {
+		if a.TotalMs > maxTotal {
+			maxTotal = a.TotalMs
+		}
+		avg := 0.0
+		if a.Count > 0 {
+			avg = a.TotalMs / float64(a.Count)
+		}
+		rows = append(rows, QueryRow{SQL: a.SQL, Fingerprint: a.Fingerprint, Connection: a.Connection, Count: a.Count, TotalMs: a.TotalMs, AvgMs: avg, MaxMs: a.MaxMs, LastSeen: a.LastSeen})
+	}
+	data["Rows"] = rows
+	data["MaxTotal"] = maxTotal
+	if err := s.queries.ExecuteTemplate(w, "layout", data); err != nil {
+		log.Printf("render queries: %v", err)
+	}
+}
+
+// handleJobs is its own page for the same reason: a queue drain is not a route.
+func (s *server) handleJobs(w http.ResponseWriter, r *http.Request) {
+	t := parseToolbar(r.URL.Query())
+	data := s.baseData(r, t, PageJobs)
+	aggs, err := s.st.JobLeaderboard(t.Project, t.Hours(), 200)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	data["Rows"] = aggs
+	if err := s.jobs.ExecuteTemplate(w, "layout", data); err != nil {
+		log.Printf("render jobs: %v", err)
 	}
 }
 

@@ -26,8 +26,10 @@ tabular figures. One focal block per page carries the only 24px number.
    are different jobs.
 2. **Tab** — underline, inside the page head, below the `h1`. Errors:
    Exceptions | Logs. Configure: Keys | Organisations | Settings.
-   Performance has no tab level: it is one ranked route table, and a route's
-   detail carries its walk, hotspots and queries (tracker #656).
+   Performance: Overview | Queries | Jobs. Overview is the merged route table
+   and a route's detail carries its walk and hotspots (tracker #656); a
+   statement shape and a queue drain outlive any one route, so they keep their
+   own pages (tracker #658).
 3. **Page** — the `h1`, plus the scope line.
 
 A level never borrows another level's mark. The active state is `aria-current`,
