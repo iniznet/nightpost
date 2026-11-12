@@ -157,6 +157,95 @@ One JSON object per line:
 attribution: named channels ship themselves precisely so a diagnostic line is
 not silently file-only.
 
+### `POST /ingest/{project}/session` — session outcome (v2)
+
+```json
+{ "session_id": "…", "release": "2026.10.10-b2c3d4", "status": "ok|crashed|abnormal",
+  "route": "/chapters/[id]", "duration_ms": 8120,
+  "service": "front", "env": "production" }
+```
+
+`session_id` and `status` are required (**422**); `session_id` is the producer's
+own random key, never a reader identifier. The beacon is idempotent on
+`(project, session_id)`: a retry updates the outcome and never counts the
+session twice. Answers **204**. Crash-free rate is a read over these rows, never
+a number this route computes.
+
+## v2 additions to every route
+
+Every route above also accepts these OPTIONAL fields. Their absence is the v1
+rollout path, never a rejection: a payload with no `service` is labelled with
+the project key as its service name.
+
+| Field | Routes | Meaning |
+|---|---|---|
+| `service` | sentry, error, profile, query, job, release, session | producer identity name |
+| `env` | profile, query, job, release, session | producer environment |
+| `kind` | profile | profile kind (`request`, `job`, `command`, …) |
+| `route` | profile, error, session | route PATTERN, never a URL with ids |
+| `span_id` | profile, error | the id of the payload's own span |
+| `spans[]` | sentry, error, profile | the v2 span batch, below |
+
+### `spans[]`
+
+```json
+{ "span_id": "16 hex", "parent_span_id": "16 hex", "kind": "db",
+  "name": "db: 14 queries", "start_ms": 0, "duration_ms": 61,
+  "status": "ok|error|unset", "route": "SELECT chapters", "peer_service": "cache" }
+```
+
+`start_ms` is an OFFSET from the payload's own start, **never a wall clock**:
+producers run on different hosts and a join on absolute time would need clock
+sync no install has. The payload's own span is the ROOT of its trace (no parent);
+a child with no `parent_span_id` hangs off that root. `route` is upserted as the
+service's route pattern, and `peer_service` names the callee so an unreported hop
+can be rendered with a name instead of a blank.
+
+Span fields are repaired rather than refused (a bad `span_id` is replaced, a
+negative `start_ms` clamps to zero, an unknown `status` becomes `ok`), each with
+its JSON path logged. A v2 span field must never turn a v1 payload into a
+rejection.
+
+### Trace identity (v2)
+
+1. A stated `trace_id` (payload or `X-Monitor-Trace-Id`) is adopted.
+2. A valid `traceparent` — exactly `00-<32 hex>-<16 hex>-01` — from a TRUSTED
+   producer is adopted.
+3. A valid `traceparent` from an untrusted producer is replaced by a minted id.
+4. Absent or malformed means minted here.
+
+The outcome is stored on every span as `{"trace_origin": "minted|adopted|replaced"}`.
+Trust is granted per service by the operator, never claimed by the payload; a
+payload with no `service` carries the project label and keeps the trace joining
+the pre-v2 server already honoured.
+
+### Admission (v2)
+
+Beside the per-project token bucket and the coarse ingress guard, three live
+settings apply, all re-read on the same refresh as the budget:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `ingest_hourly` | `0` (off) | events per project per hour, beside the burst |
+| `ingest_rate_errors` | `0` (off) | events/s for the errors class, its own bucket |
+| `ingest_rate_profiles` | `0` (off) | events/s for the profiles class |
+| `ingest_rate_logs` | `0` (off) | events/s for the logs class |
+| `ingest_rate_spans` | `0` (off) | spans/s for a span batch (attached to `spans[]`) |
+
+Every **429** carries `Retry-After` in seconds, computed from the dimension that
+refused, and is decided before any body read. A span batch that does not fit its
+budget is dropped while the event around it is still stored: the issue, log or
+profile is the primary record.
+
+### Digest validation and raw envelopes (v2)
+
+| Setting | Default | Effect |
+|---|---|---|
+| `ingest.validate` | `strict` | `warn` logs an invalid field's JSON path (e.g. `spans[2].duration_ms`) and stores the event anyway |
+| `ingest.keep_envelopes` | `0` | keep the last N raw bodies (project, received_at, route, accepted, error, body); the oldest beyond N is deleted on write |
+
+`strict` is byte-for-byte the pre-v2 behaviour.
+
 ## The fold contract
 
 A callgraph arrives as a flat edge list; the server folds it into one canonical

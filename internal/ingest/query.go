@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -16,6 +17,9 @@ type queryPayload struct {
 	TimeMs      float64 `json:"time_ms"`
 	Environment string  `json:"environment"`
 	Connection  string  `json:"connection"`
+	// Service and Env are the v2 producer identity; both optional.
+	Service string `json:"service"`
+	Env     string `json:"env"`
 }
 
 const maxQuerySQL = 8192
@@ -29,30 +33,43 @@ func QueryHandler(st *store.Store) http.HandlerFunc {
 			project = "default"
 		}
 		r.Body = http.MaxBytesReader(w, r.Body, 16*1024)
-		var p queryPayload
-		dec := json.NewDecoder(r.Body)
-		if err := dec.Decode(&p); err != nil && err != io.EOF {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
 			http.Error(w, "malformed json", http.StatusBadRequest)
 			return
 		}
+		var p queryPayload
+		dec := json.NewDecoder(bytes.NewReader(body))
+		if err := dec.Decode(&p); err != nil && err != io.EOF {
+			captureRaw(st, project, "query", body, false, "body: malformed json")
+			http.Error(w, "malformed json", http.StatusBadRequest)
+			return
+		}
+		d := newDigest(st, project, "query")
 		p.SQL = strings.TrimSpace(p.SQL)
 		if p.SQL == "" || len(p.SQL) > maxQuerySQL {
-			http.Error(w, "sql missing or oversized", http.StatusUnprocessableEntity)
-			return
+			d.issue("sql", "sql missing or oversized")
 		}
 		if p.TimeMs <= 0 || p.TimeMs > 86_400_000 {
-			http.Error(w, "time_ms out of range", http.StatusUnprocessableEntity)
+			d.issue("time_ms", "time_ms out of range")
+		}
+		if len(p.Connection) > 64 {
+			d.issue("connection", "connection oversized")
+		}
+		if d.rejected() {
+			captureRaw(st, project, "query", body, false, d.reason())
+			http.Error(w, d.reason(), http.StatusUnprocessableEntity)
 			return
 		}
-		conn := p.Connection
-		if len(conn) > 64 {
-			http.Error(w, "connection oversized", http.StatusUnprocessableEntity)
-			return
-		}
-		if _, err := st.RecordQuery(project, p.SQL, p.TimeMs, conn, p.Environment); err != nil {
+		// query_stats has no service column in v2; the identity is admitted so the
+		// producer is known, and the aggregate keeps its v1 shape.
+		resolveService(st, project, p.Service, p.Env, "query")
+		if _, err := st.RecordQuery(project, p.SQL, p.TimeMs, p.Connection, p.Environment); err != nil {
+			captureRaw(st, project, "query", body, false, "store: "+err.Error())
 			http.Error(w, "store failure", http.StatusInternalServerError)
 			return
 		}
+		captureRaw(st, project, "query", body, true, "")
 		w.WriteHeader(http.StatusAccepted)
 	}
 }

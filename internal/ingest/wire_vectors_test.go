@@ -42,6 +42,14 @@ type wireVector struct {
 		Version   string  `json:"version"`
 		Channel   string  `json:"channel"`
 		Level     string  `json:"level"`
+		// v2 expectations. Service is the producer identity the payload named
+		// (or the project key the v1 rollout path labels it with); Spans is the
+		// row count of the trace the payload landed in; Sessions and Crashed
+		// read the crash-free ratio the beacon feeds.
+		Service  string `json:"service"`
+		Spans    int    `json:"spans"`
+		Sessions int    `json:"sessions"`
+		Crashed  int    `json:"crashed"`
 	} `json:"expect"`
 }
 
@@ -104,6 +112,9 @@ func runWireVector(t *testing.T, path string) {
 	if rec.Code != v.Expect.Status {
 		t.Fatalf("status = %d, want %d (body %.200s)", rec.Code, v.Expect.Status, rec.Body.String())
 	}
+	if v.Expect.Service != "" {
+		assertWireService(t, st, v.Project, v.Expect.Service)
+	}
 	switch v.Expect.Assert {
 	case "none":
 		// A rejected payload is a contract too: it must not be stored.
@@ -117,6 +128,8 @@ func runWireVector(t *testing.T, path string) {
 		assertWireJob(t, st, v)
 	case "release":
 		assertWireRelease(t, st, v)
+	case "session":
+		assertWireSession(t, st, v)
 	default:
 		t.Fatalf("unknown assertion %q — a vector that asserts nothing is not a vector", v.Expect.Assert)
 	}
@@ -145,6 +158,8 @@ func wireHandler(t *testing.T, route string, st *store.Store) http.HandlerFunc {
 		return JobHandler(st)
 	case "release":
 		return ReleaseHandler(st)
+	case "session":
+		return SessionHandler(st)
 	}
 	t.Fatalf("no handler wired for route %q — a new ingest route must add a vector leg", route)
 	return nil
@@ -167,6 +182,20 @@ func assertWireProfile(t *testing.T, st *store.Store, v wireVector) {
 	}
 	if v.Expect.Duration > 0 && legs[0].DurationMs != v.Expect.Duration {
 		t.Errorf("duration = %v, want %v", legs[0].DurationMs, v.Expect.Duration)
+	}
+	// A v2 vector also freezes the WATERFALL: the payload's own span is the
+	// root, so the row count is the root plus the reported children.
+	if v.Expect.Spans > 0 {
+		spans, err := st.TraceSpans(v.Expect.Trace)
+		if err != nil {
+			t.Fatalf("trace spans: %v", err)
+		}
+		if len(spans) != v.Expect.Spans {
+			t.Errorf("trace %s holds %d spans, want %d", v.Expect.Trace, len(spans), v.Expect.Spans)
+		}
+		if len(spans) > 0 && spans[0].ParentSpanID != "" {
+			t.Errorf("the payload's own span must be the root, got parent %q", spans[0].ParentSpanID)
+		}
 	}
 }
 
@@ -217,6 +246,39 @@ func assertWireRelease(t *testing.T, st *store.Store, v wireVector) {
 	mark, err := st.LatestRelease(v.Project, "")
 	if err != nil || mark == nil || mark.Version != v.Expect.Version {
 		t.Fatalf("mark=%+v err=%v, want version %q", mark, err, v.Expect.Version)
+	}
+}
+
+// assertWireService checks the producer identity a payload admitted. The v1
+// rollout path is covered by the same assertion: a payload with no "service"
+// must land as the project key, which is what keeps the upgrade banner and the
+// service filter honest during rollout.
+func assertWireService(t *testing.T, st *store.Store, project, want string) {
+	t.Helper()
+	services, err := st.Services(project)
+	if err != nil {
+		t.Fatalf("services: %v", err)
+	}
+	for _, svc := range services {
+		if svc.Name == want {
+			return
+		}
+	}
+	t.Errorf("service %q was not recorded; services = %+v", want, services)
+}
+
+// assertWireSession reads the crash-free ratio the beacon is the only writer of.
+func assertWireSession(t *testing.T, st *store.Store, v wireVector) {
+	t.Helper()
+	sessions, crashed, _, err := st.CrashFree(v.Project, "")
+	if err != nil {
+		t.Fatalf("crash free: %v", err)
+	}
+	if sessions != int64(v.Expect.Sessions) {
+		t.Errorf("sessions = %d, want %d", sessions, v.Expect.Sessions)
+	}
+	if crashed != int64(v.Expect.Crashed) {
+		t.Errorf("crash sessions = %d, want %d", crashed, v.Expect.Crashed)
 	}
 }
 

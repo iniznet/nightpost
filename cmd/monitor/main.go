@@ -85,6 +85,7 @@ func main() {
 	sh := ingest.NewShaper(
 		st.SettingFloat(store.SettingIngestRate, *ingestRate),
 		st.SettingFloat(store.SettingIngestBurst, *ingestBurst),
+		ingest.WithSettings(st),
 	)
 	gate := ingest.NewKeyGate(st, 5*time.Second)
 	gate.ConfigureAutoProvision(*maxAutoProjects, *requireIngestKeys)
@@ -154,6 +155,7 @@ func main() {
 	mux.HandleFunc("POST /ingest/{project}/query", chain(ingest.PathProject, ingest.QueryHandler(st)))
 	mux.HandleFunc("POST /ingest/{project}/job", chain(ingest.PathProject, ingest.JobHandler(st)))
 	mux.HandleFunc("POST /ingest/{project}/release", chain(ingest.PathProject, ingest.ReleaseHandler(st)))
+	mux.HandleFunc("POST /ingest/{project}/session", chain(ingest.PathProject, ingest.SessionHandler(st)))
 	// Sentry SDK compatibility: sentry-laravel POSTs envelopes to /api/{id}/store.
 	mux.HandleFunc("POST /api/{project}/store", chain(ingest.PathProject, ingest.SentryHandler(st)))
 	mux.HandleFunc("POST /api/{project}/store/", chain(ingest.PathProject, ingest.SentryHandler(st)))
@@ -164,6 +166,9 @@ func main() {
 	mux.HandleFunc("POST /api/{project}/profiler/store", chain(ingest.XHProfProject, ingest.XHProfHandler(st)))
 	// Browser preflight for the first-party reporter endpoints.
 	mux.HandleFunc("OPTIONS /ingest/{project}/error", ingest.PreflightSource(cors.OriginFor))
+	// The session beacon is posted from the reader page, so its preflight is
+	// the same allowlist check the other browser emitters use.
+	mux.HandleFunc("OPTIONS /ingest/{project}/session", ingest.PreflightSource(cors.OriginFor))
 	mux.HandleFunc("OPTIONS /ingest/{project}/profile", ingest.PreflightSource(cors.OriginFor))
 	// Health contract. /up is LIVENESS — the process answers, and it
 	// deliberately never touches the database, so a sick store cannot get the

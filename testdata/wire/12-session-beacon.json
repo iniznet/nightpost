@@ -1,0 +1,26 @@
+{
+  "spec": 1,
+  "name": "session-beacon",
+  "transport": "http",
+  "route": "POST /ingest/{project}/session",
+  "project": "wire",
+  "headers": {
+    "content-type": "application/json"
+  },
+  "body": {
+    "session_id": "wire-s1",
+    "release": "2026.10.10-b2c3d4",
+    "status": "crashed",
+    "route": "/chapters/[id]",
+    "duration_ms": 8120,
+    "service": "wire-front",
+    "env": "production"
+  },
+  "expect": {
+    "status": 204,
+    "assert": "session",
+    "sessions": 1,
+    "crashed": 1,
+    "service": "wire-front"
+  }
+}
