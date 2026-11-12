@@ -127,11 +127,17 @@ input.
 
 ```json
 { "name": "quests:reset-stale-progress", "kind": "command", "queue": "default",
-  "seconds": 3.2, "ok": true, "count": 1, "last_trace": "…" }
+  "seconds": 3.2, "ok": true, "count": 1, "last_trace": "…",
+  "schedule_cron": "*/5 * * * *", "next_expected_at": 1794480000, "grace_seconds": 300 }
 ```
 
 `kind` is `command` or `queue` (inferred when absent). Repeated runs aggregate;
 a failure flips the aggregate's last status.
+
+The three schedule fields are optional and independent of the run itself: the
+producer states the promise, and the server needs no cron parser to honour it.
+`next_expected_at` is unix seconds; a run that arrives after it plus
+`grace_seconds` is marked missed by the sweep.
 
 ### `POST /ingest/{project}/release` — deploy marker
 
@@ -185,6 +191,9 @@ the project key as its service name.
 | `route` | profile, error, session | route PATTERN, never a URL with ids |
 | `span_id` | profile, error | the id of the payload's own span |
 | `spans[]` | sentry, error, profile | the v2 span batch, below |
+| `schedule_cron` | job | the cron expression the run promises, as display text |
+| `next_expected_at` | job | unix seconds the next run is due; absent means unscheduled |
+| `grace_seconds` | job | how late the run may be before a sweep marks it missed |
 
 ### `spans[]`
 

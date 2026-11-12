@@ -18,8 +18,11 @@ must stay server-rendered.
 | [../WIRE_SPEC.md](../WIRE_SPEC.md) | you are implementing a producer, porting a client, or asking whether a payload is legal |
 | [../DEPLOY.md](../DEPLOY.md) | you are installing, exposing, upgrading or recovering an instance |
 | [write-your-own-sdk.md](write-your-own-sdk.md) | you want a client for a language nobody has written one for yet |
+| [architecture/perf-model.md](architecture/perf-model.md) | you are reading a journey, changing a grouping rule, or explaining a coverage gap |
 | [producers/laravel.md](producers/laravel.md) | the producer is Laravel |
 | [producers/sveltekit.md](producers/sveltekit.md) | the producer is SvelteKit or Node |
+| [producers/browser.md](producers/browser.md) | the producer is a page, reporting errors or sessions from the browser |
+| [producers/go.md](producers/go.md) | the producer is Go, or you are porting the wire contract to a new language |
 | [producers/webhook.md](producers/webhook.md) | the producer is anything else, or you just want curl |
 
 ## Screenshot gallery
