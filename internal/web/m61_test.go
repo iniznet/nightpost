@@ -93,9 +93,10 @@ func TestLegacyRoutesServeConsolidatedContent(t *testing.T) {
 		}
 	}
 
-	// The five performance tab paths merged into one page (#656). A bookmark
-	// must land on the merged index with its scope, never on a 404.
-	for _, legacy := range []string{"/profiles?project=backend&type=request", "/traces?project=backend", "/slowest?project=backend", "/queries?project=backend", "/jobs?project=backend"} {
+	// The three route-performance paths merged into one page (#656). A bookmark
+	// must land on the merged index with its scope, never on a 404. Queries and
+	// Jobs are their own pages again (#658), so they are not in this list.
+	for _, legacy := range []string{"/profiles?project=backend&type=request", "/traces?project=backend", "/slowest?project=backend"} {
 		client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 		resp, err := client.Get(srv.URL + legacy)
 		if err != nil {
@@ -185,4 +186,70 @@ func TestTracesIndexAndDeepLink(t *testing.T) {
 		t.Errorf("unknown trace status %d, want 404", resp.StatusCode)
 	}
 	readAll(t, resp)
+}
+
+
+// Invariant: the Performance section is ONE merged route view plus two sibling
+// pages (#658). Merging the route pages must not swallow the statement and
+// queue surfaces, and a reader inside a route still sees which tab they are in.
+func TestPerformanceTabsCarryThreeSiblings(t *testing.T) {
+	srv, st := newTestServer(t)
+	seedUI(t, st)
+	cases := []struct{ path, current string }{
+		{"/performance", "Overview"},
+		{"/queries", "Queries"},
+		{"/jobs", "Jobs"},
+	}
+	for _, c := range cases {
+		resp, err := http.Get(srv.URL + c.path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", c.path, err)
+		}
+		body := readAll(t, resp)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET %s: status %d, want 200", c.path, resp.StatusCode)
+		}
+		for _, tab := range []string{"Overview", "Queries", "Jobs"} {
+			if !strings.Contains(body, ">"+tab+"</a>") {
+				t.Errorf("GET %s: tab %q missing from the strip", c.path, tab)
+			}
+		}
+		if want := `aria-current="page">` + c.current; !strings.Contains(body, want) {
+			t.Errorf("GET %s: %q is not marked current", c.path, c.current)
+		}
+	}
+}
+
+// The statement surface answers on its own page with its own heading.
+func TestQueriesPageRendersLeaderboard(t *testing.T) {
+	srv, st := newTestServer(t)
+	seedUI(t, st)
+	resp, err := http.Get(srv.URL + "/queries?project=backend")
+	if err != nil {
+		t.Fatalf("GET /queries: %v", err)
+	}
+	body := readAll(t, resp)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, want 200", resp.StatusCode)
+	}
+	if !strings.Contains(body, "Slow queries") {
+		t.Error("the queries page lost its heading")
+	}
+}
+
+// The queue surface answers on its own page with its own heading.
+func TestJobsPageRendersLeaderboard(t *testing.T) {
+	srv, st := newTestServer(t)
+	seedUI(t, st)
+	resp, err := http.Get(srv.URL + "/jobs?project=backend")
+	if err != nil {
+		t.Fatalf("GET /jobs: %v", err)
+	}
+	body := readAll(t, resp)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, want 200", resp.StatusCode)
+	}
+	if !strings.Contains(body, "Jobs &amp; commands") {
+		t.Error("the jobs page lost its heading")
+	}
 }

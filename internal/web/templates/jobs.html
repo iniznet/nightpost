@@ -1,0 +1,26 @@
+{{define "title"}}Jobs — nightpost{{end}}
+{{define "subtabs"}}{{template "tabsPerf" .}}{{end}}
+{{define "heading"}}Jobs &amp; commands{{end}}
+{{define "content"}}
+<p class="faint">Queue jobs and Artisan commands grouped by name over the last 7 days — cadence, outcome and a rolling 24h failure count. Payloads and arguments are never captured.</p>
+{{if .Rows}}
+<table>
+<thead><tr><th scope="col">Name</th><th scope="col">Kind</th><th scope="col">Queue</th><th scope="col">Last run</th><th scope="col">Status</th><th scope="col">Runs</th><th scope="col">Fails 24h</th><th scope="col">Avg</th><th scope="col">Last</th></tr></thead>
+<tbody>
+{{range .Rows}}
+<tr>
+  <td class="mono" title="{{.Name}}">{{trunc .Name 90}}</td>
+  <td class="dim">{{.Kind}}</td>
+  <td class="mono dim">{{or .Queue "—"}}</td>
+  <td class="dim" title="{{.LastRunAt.Format "2006-01-02 15:04:05"}}">{{rel .LastRunAt}}</td>
+  <td><span class="badge lvl-{{if eq .LastStatus "ok"}}info{{else}}error{{end}}">{{.LastStatus}}</span></td>
+  <td class="num">{{.Runs}}</td>
+  <td class="num">{{if .Failures24h}}{{.Failures24h}}{{else}}—{{end}}</td>
+  <td class="num">{{ms .AvgMs}}</td>
+  <td class="num">{{if .LastTrace}}<a href="/traces/{{.LastTrace}}" title="waterfall + call tree of the last profiled run">{{ms .LastMs}}</a>{{else}}{{ms .LastMs}}{{end}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{else}}<p class="empty">No job telemetry captured yet. <a href="{{tl .Toolbar "/performance"}}">Check endpoint latency meanwhile</a> — queue and command rows need <code class="mono">MONITOR_JOB_CAPTURE</code> on the producer.</p>{{end}}
+{{end}}
