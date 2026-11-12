@@ -157,6 +157,11 @@ func main() {
 	mux.HandleFunc("POST /ingest/{project}/job", chain(ingest.PathProject, ingest.JobHandler(st)))
 	mux.HandleFunc("POST /ingest/{project}/release", chain(ingest.PathProject, ingest.ReleaseHandler(st)))
 	mux.HandleFunc("POST /ingest/{project}/session", chain(ingest.PathProject, ingest.SessionHandler(st)))
+	// OpenTelemetry collectors, JSON only. The collector is configured with ONE
+	// endpoint, so the project travels as ?project= instead of a path segment and
+	// falls back to the install's first project.
+	mux.HandleFunc("POST /v1/traces", chain(ingest.OTLPProject(st), ingest.TracesHandler(st)))
+	mux.HandleFunc("POST /v1/logs", chain(ingest.OTLPProject(st), ingest.LogsHandler(st)))
 	// Sentry SDK compatibility: sentry-laravel POSTs envelopes to /api/{id}/store.
 	mux.HandleFunc("POST /api/{project}/store", chain(ingest.PathProject, ingest.SentryHandler(st)))
 	mux.HandleFunc("POST /api/{project}/store/", chain(ingest.PathProject, ingest.SentryHandler(st)))

@@ -246,6 +246,64 @@ profile is the primary record.
 
 `strict` is byte-for-byte the pre-v2 behaviour.
 
+## OpenTelemetry (v2)
+
+Two collector routes accept the OTLP **JSON** encoding — never protobuf, which
+would add a generated-code dependency for data these routes already carry.
+
+| Route | Envelope |
+|---|---|
+| `POST /v1/traces` | `resourceSpans[]` → `scopeSpans[]` → `spans[]` |
+| `POST /v1/logs` | `resourceLogs[]` → `scopeLogs[]` → `logRecords[]` |
+
+**Project.** The collector is configured with one endpoint, so the key travels as
+`?project=` and falls back to the install's first configured project, then to
+`default` — the same last resort the Monolog leg uses. The ingest key, when the
+project has one, is presented exactly as on `/ingest/{project}/…`.
+
+**Service identity.** `service.name` from the resource attributes is the
+producer identity, admitted through the services table and falling back to the
+project key when the resource carries none. `deployment.environment` (or
+`deployment.environment.name`) is the environment.
+
+**Spans.** Each span becomes a row of the `spans` table, the same table the
+first-party producers write:
+
+| Span field | Subscription |
+|---|---|
+| `traceId` / `spanId` / `parentSpanId` | exact OTLP width, lowercase hex (32/16/16); an all-zero parent means "no parent" |
+| `kind` | `1` internal, `2` server, `3` client, `4` producer, `5` consumer |
+| `status.code` | `2` error; anything else ok |
+| `startTimeUnixNano` / `endTimeUnixNano` | the producer's own clock — see below |
+| `attributes` | `http.route` (then `http.target`, `url.path`) is the route pattern the journey names the hop by; `peer.service` (then `net.peer.name`) names the callee |
+
+`start_ms` is **relative to the earliest span in the same trace**, never an
+absolute wall clock: two hosts with skewed clocks still order correctly, and the
+journeys materialiser reads only the relative value.
+
+**Refusal is whole-envelope.** A `traceId`, `spanId` or `parentSpanId` that is
+not lowercase hex of the exact length answers **400** with a named error
+(`otlp: malformed trace id`, `… span id`, `… parent span id`) and stores nothing:
+a half-written trace draws a gap no reader can tell from a callee that never
+reported.
+
+**Retries are idempotent.** A span id already stored for that trace is skipped,
+so a re-delivered batch never counts a hop twice. The response reports
+`{"spans": n, "duplicates": n, "trace_ids": [...]}`; `/v1/logs` reports
+`{"logs": n}`.
+
+**Logs** map onto the Monolog path, so one log stream serves both producers:
+`severityText` (lower-cased) is the level, `severityNumber` a fallback;
+`body.stringValue` is the message; the `log.channel` attribute is the channel,
+else the scope name; every other attribute is the context;
+`timeUnixNano` is the clock the record was stamped with.
+
+Both routes share the admission and raw-envelope rules above: the coarse guard
+and the per-project bucket answer **429** with `Retry-After` before any body
+read, the batch is charged against its item dimension (`spans`, `logs`), and
+`ingest.keep_envelopes` captures the raw body under the routes `traces` and
+`logs`.
+
 ## The fold contract
 
 A callgraph arrives as a flat edge list; the server folds it into one canonical

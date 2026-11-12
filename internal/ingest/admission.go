@@ -438,6 +438,8 @@ func itemForPath(path string) string {
 		return ItemProfiles
 	case strings.HasSuffix(path, "/profile"), strings.HasSuffix(path, "/xhprof"):
 		return ItemProfiles
+	case strings.HasSuffix(path, "/v1/traces"):
+		return ItemSpans
 	case strings.HasSuffix(path, "/sentry"), strings.HasSuffix(path, "/error"),
 		strings.HasSuffix(path, "/envelope"), strings.HasSuffix(path, "/store"),
 		strings.HasSuffix(path, "/store/"):

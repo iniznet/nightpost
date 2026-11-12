@@ -1,0 +1,29 @@
+{
+  "resourceLogs": [
+    {
+      "resource": {
+        "attributes": [
+          { "key": "service.name", "value": { "stringValue": "wire-backend" } },
+          { "key": "deployment.environment", "value": { "stringValue": "production" } }
+        ]
+      },
+      "scopeLogs": [
+        {
+          "scope": { "name": "monolog" },
+          "logRecords": [
+            {
+              "timeUnixNano": "1700000000000000000",
+              "severityText": "ERROR",
+              "severityNumber": 17,
+              "body": { "stringValue": "wire: Turnstile verification rejected" },
+              "attributes": [
+                { "key": "log.channel", "value": { "stringValue": "security" } },
+                { "key": "error-codes", "value": { "stringValue": "invalid-input-response" } }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
