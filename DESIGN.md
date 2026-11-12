@@ -25,8 +25,9 @@ tabular figures. One focal block per page carries the only 24px number.
    `Configure`). Four destinations, because a data surface and a config surface
    are different jobs.
 2. **Tab** — underline, inside the page head, below the `h1`. Errors:
-   Exceptions | Logs. Performance: Endpoints | Traces | Hotspots | Queries |
-   Jobs. Configure: Keys | Organisations | Settings.
+   Exceptions | Logs. Configure: Keys | Organisations | Settings.
+   Performance has no tab level: it is one ranked route table, and a route's
+   detail carries its walk, hotspots and queries (tracker #656).
 3. **Page** — the `h1`, plus the scope line.
 
 A level never borrows another level's mark. The active state is `aria-current`,
@@ -49,6 +50,15 @@ says in one line why the action does not exist instead of showing a dead control
 - **Drill paths carry their origin.** A row link sends `from=<list URL>`; the
   detail page's back link returns there, filters intact, and refuses an
   absolute target.
+
+## Performance answers two questions in one place
+
+The index ranks routes by accumulated wall clock. Each row states the other
+service's p95 and the share of requests that carried its leg, so a missing leg
+reads `not received` instead of a blank that looks fast. The route detail
+walks the last twenty requests: front render, the spans inside it, the other
+service's legs, then an explicit gap row when a step never reported. Steps are
+scaled against the longest step because they nest, never summed.
 
 ## The landing page answers the question
 

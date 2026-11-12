@@ -26,23 +26,23 @@ const (
 )
 
 type Span struct {
-	Name       string         `json:"name"`
-	DurationMs float64        `json:"duration_ms"`
+	Name       string  `json:"name"`
+	DurationMs float64 `json:"duration_ms"`
 	// StartMs is the span's offset from ITS OWN profile's start (elapsed,
 	// never absolute wall-clock) — cross-service waterfalls join legs through
 	// the parent's measured window, so clock sync between containers is
 	// never required. Zero means "report order", the legacy layout.
-	StartMs    float64        `json:"start_ms,omitempty"`
-	Tags       map[string]any `json:"tags,omitempty"`
+	StartMs float64        `json:"start_ms,omitempty"`
+	Tags    map[string]any `json:"tags,omitempty"`
 }
 
 // TreeNode is one node of a pruned call tree : the execution stack
 // with an inclusive wall-clock duration per step. Keys are deliberately
 // short because the JSON ships on the ingest wire from the SvelteKit front.
 type TreeNode struct {
-	N string     `json:"n"`          // function name
-	S float64    `json:"s"`          // self ms (inclusive minus expanded children)
-	I float64    `json:"i"`          // inclusive ms
+	N string     `json:"n"`           // function name
+	S float64    `json:"s"`           // self ms (inclusive minus expanded children)
+	I float64    `json:"i"`           // inclusive ms
 	C int64      `json:"c,omitempty"` // calls folded into this edge
 	K []TreeNode `json:"k,omitempty"` // children
 }
@@ -191,13 +191,27 @@ func (s *Store) Profile(id int64) (*Profile, error) {
 
 // SlowestCode aggregates hotspots across the most recent callgraph profiles
 // of a project into a ranked leaderboard.
+// SlowestCode is the project-wide hotspot leaderboard.
 func (s *Store) SlowestCode(projectKey string, sampleLimit int) ([]HotspotAgg, error) {
+	return s.slowestCode(projectKey, "", sampleLimit)
+}
+
+// SlowestCodeForRoute scopes the same leaderboard to one route's callgraph
+// samples, so a page's drill-down can name the function it spends time in.
+func (s *Store) SlowestCodeForRoute(projectKey, route string, sampleLimit int) ([]HotspotAgg, error) {
+	if route == "" {
+		return nil, nil
+	}
+	return s.slowestCode(projectKey, route, sampleLimit)
+}
+
+func (s *Store) slowestCode(projectKey, route string, sampleLimit int) ([]HotspotAgg, error) {
 	if sampleLimit <= 0 || sampleLimit > 1000 {
 		sampleLimit = 500
 	}
 	rows, err := s.rdb.Query(`SELECT id, name, hotspots, created_at FROM profiles
-		WHERE type = ? AND (? = '' OR project_key = ?) AND hotspots <> '' AND hotspots IS NOT NULL
-		ORDER BY created_at DESC, id DESC LIMIT ?`, ProfileTypeCallgraph, projectKey, projectKey, sampleLimit)
+		WHERE type = ? AND (? = '' OR project_key = ?) AND (? = '' OR name = ?) AND hotspots <> '' AND hotspots IS NOT NULL
+		ORDER BY created_at DESC, id DESC LIMIT ?`, ProfileTypeCallgraph, projectKey, projectKey, route, route, sampleLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -329,6 +343,198 @@ func (s *Store) ProfileRouteStats(projectKey, typ string, hours, limit int) ([]R
 		out = out[:limit]
 	}
 	return out, nil
+}
+
+// RouteIndexRow is one row of the merged Performance index: a route's cost in
+// the window, plus the cross-service picture stitched through trace_id.
+// Backend fields stay zero when no second leg arrived, and the page renders
+// that absence as a dash instead of dropping the column.
+type RouteIndexRow struct {
+	Project    string
+	Name       string
+	Count      int64
+	TotalMs    float64
+	AvgMs      float64
+	P50Ms      float64
+	P95Ms      float64
+	MaxMs      float64
+	LastSeen   time.Time
+	Traces     int64
+	Traced     int64
+	BackendN   int64
+	BackendP95 float64
+}
+
+// TracedPct is the share of the route's traces that carried a second leg.
+func (r RouteIndexRow) TracedPct() float64 {
+	if r.Traces == 0 {
+		return 0
+	}
+	return float64(r.Traced) / float64(r.Traces) * 100
+}
+
+// RouteIndex answers "which page is slow" for every project in scope, and
+// "did the other service answer" in the same row. Three bounded reads over
+// one rowCap window, no schema change: root request legs, per-route trace
+// counts, and every cross-project leg that shares a trace id.
+func (s *Store) RouteIndex(project string, hours, limit int) ([]RouteIndexRow, error) {
+	if hours <= 0 || hours > 168 {
+		hours = 24
+	}
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	const rowCap = 20000
+	const backendCap = 2000
+	cutoff := time.Now().Add(-time.Duration(hours) * time.Hour).Unix()
+
+	type acc struct {
+		row    RouteIndexRow
+		durs   []float64
+		be     []float64
+		traces map[string]struct{}
+	}
+	byKey := map[[2]string]*acc{}
+
+	roots, err := s.rdb.Query(`SELECT project_key, name, duration_ms, created_at FROM profiles
+		WHERE type = ? AND (? = '' OR project_key = ?) AND created_at >= ?
+		ORDER BY created_at DESC, id DESC LIMIT ?`,
+		ProfileTypeRequest, project, project, cutoff, rowCap)
+	if err != nil {
+		return nil, err
+	}
+	defer roots.Close()
+	for roots.Next() {
+		var projectKey, name string
+		var ms float64
+		var created int64
+		if err := roots.Scan(&projectKey, &name, &ms, &created); err != nil {
+			return nil, err
+		}
+		a := byKey[[2]string{projectKey, name}]
+		if a == nil {
+			a = &acc{traces: map[string]struct{}{}}
+			a.row.Project, a.row.Name = projectKey, name
+			byKey[[2]string{projectKey, name}] = a
+		}
+		a.row.Count++
+		a.row.TotalMs += ms
+		if ms > a.row.MaxMs {
+			a.row.MaxMs = ms
+		}
+		if created > a.row.LastSeen.Unix() {
+			a.row.LastSeen = time.Unix(created, 0)
+		}
+		a.durs = append(a.durs, ms)
+	}
+	if err := roots.Err(); err != nil {
+		return nil, err
+	}
+
+	cov, err := s.rdb.Query(`SELECT project_key, name, COUNT(DISTINCT trace_id) FROM profiles
+		WHERE type = ? AND trace_id <> '' AND (? = '' OR project_key = ?) AND created_at >= ?
+		GROUP BY project_key, name`,
+		ProfileTypeRequest, project, project, cutoff)
+	if err != nil {
+		return nil, err
+	}
+	defer cov.Close()
+	for cov.Next() {
+		var projectKey, name string
+		var n int64
+		if err := cov.Scan(&projectKey, &name, &n); err != nil {
+			return nil, err
+		}
+		if a := byKey[[2]string{projectKey, name}]; a != nil {
+			a.row.Traces = n
+		}
+	}
+	if err := cov.Err(); err != nil {
+		return nil, err
+	}
+
+	legs, err := s.rdb.Query(`SELECT r.project_key, r.name, r.trace_id, o.duration_ms
+		FROM profiles r JOIN profiles o
+		  ON o.trace_id = r.trace_id AND o.project_key <> r.project_key
+		WHERE r.type = ? AND r.trace_id <> '' AND (? = '' OR r.project_key = ?) AND r.created_at >= ?
+		ORDER BY r.created_at DESC LIMIT 40000`,
+		ProfileTypeRequest, project, project, cutoff)
+	if err != nil {
+		return nil, err
+	}
+	defer legs.Close()
+	for legs.Next() {
+		var projectKey, name, trace string
+		var ms float64
+		if err := legs.Scan(&projectKey, &name, &trace, &ms); err != nil {
+			return nil, err
+		}
+		a := byKey[[2]string{projectKey, name}]
+		if a == nil {
+			continue
+		}
+		a.traces[trace] = struct{}{}
+		a.row.BackendN++
+		if len(a.be) < backendCap {
+			a.be = append(a.be, ms)
+		}
+	}
+	if err := legs.Err(); err != nil {
+		return nil, err
+	}
+
+	out := make([]RouteIndexRow, 0, len(byKey))
+	for _, a := range byKey {
+		sort.Float64s(a.durs)
+		n := len(a.durs)
+		if n == 0 {
+			continue
+		}
+		a.row.AvgMs = a.row.TotalMs / float64(a.row.Count)
+		a.row.P50Ms = a.durs[min(n-1, n*50/100)]
+		a.row.P95Ms = a.durs[min(n-1, n*95/100)]
+		a.row.Traced = int64(len(a.traces))
+		if len(a.be) > 0 {
+			sort.Float64s(a.be)
+			a.row.BackendP95 = a.be[min(len(a.be)-1, len(a.be)*95/100)]
+		}
+		out = append(out, a.row)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].TotalMs > out[j].TotalMs })
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// TraceIDsForRoute lists the traces a route appears in, newest first. The
+// detail page stitches each id back into its full leg set.
+func (s *Store) TraceIDsForRoute(project, route string, hours, limit int) ([]string, error) {
+	if hours <= 0 || hours > 168 {
+		hours = 24
+	}
+	if limit <= 0 || limit > 200 {
+		limit = 20
+	}
+	cutoff := time.Now().Add(-time.Duration(hours) * time.Hour).Unix()
+	rows, err := s.rdb.Query(`SELECT trace_id, MAX(created_at) AS last FROM profiles
+		WHERE trace_id <> '' AND name = ? AND (? = '' OR project_key = ?) AND created_at >= ?
+		GROUP BY trace_id ORDER BY last DESC LIMIT ?`,
+		route, project, project, cutoff, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		var last int64
+		if err := rows.Scan(&id, &last); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
 }
 
 // ProfilesFiltered lists profiles of one type whose name matches a substring

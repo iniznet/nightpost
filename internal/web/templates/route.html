@@ -1,0 +1,35 @@
+{{define "title"}}{{.Row.Name}} — performance — nightpost{{end}}
+{{define "heading"}}{{.Row.Name}}{{end}}
+{{define "content"}}
+<p class="faint">{{.Row.Project}} · {{.Row.Count}} requests · p50 {{ms .Row.P50Ms}} · p95 {{ms .Row.P95Ms}} · max {{ms .Row.MaxMs}} · other service {{if .Row.BackendP95}}p95 {{ms .Row.BackendP95}}{{else}}not received{{end}} · <a href="/performance">all routes</a></p>
+<h2>Request walk</h2>
+<p class="faint">One row per request, newest first. Open one to read its steps in order: the front render, the work inside it, the other service, and any step that never reported.</p>
+{{if .Traces}}
+{{range .Traces}}
+<details class="tn">
+  <summary><span class="mono">{{trunc .TraceID 12}}</span> · {{.Legs}} leg{{if ne .Legs 1}}s{{end}} · <span class="mono">{{ms .TotalMs}}</span> · <span class="dim">{{.Projects}}</span> · <span class="dim">{{rel .LastSeen}}</span></summary>
+  {{range .Steps}}{{if eq .Kind "missing"}}
+  <div class="bar-row"><div class="dim">{{.Note}}</div><div class="track"></div><div class="nowrap dim">gap</div></div>
+  {{else}}
+  <div class="bar-row"><div><span class="badge">{{.Project}}</span> <span class="mono">{{.Name}}</span></div><div class="track"><span class="fill wf-fill" style="margin-left:{{.Left}}%;width:{{.Width}}%"></span></div><div class="nowrap mono">{{ms .Ms}}</div></div>
+  {{end}}{{end}}
+</details>
+{{end}}
+{{else}}<p class="empty">No traces for this route in this range. <a href="/performance">Pick another route</a> or widen the range.</p>{{end}}
+<h2>Code hotspots</h2>
+{{if .Hotspots}}
+{{range .Hotspots}}
+<div class="bar-row"><div class="mono" title="{{.Function}}">{{.Function}}</div><div class="track"><span class="fill wf-fill" style="width:{{pct .TotalSelfMs $.MaxSelf}}%"></span></div><div class="nowrap"><span class="mono">{{ms .TotalSelfMs}}</span>{{if .Samples}} · <span class="mono">{{.Samples}}</span>{{end}}</div></div>
+{{end}}
+{{else}}<p class="empty">No callgraph samples for this route. <a href="/settings">Set a deep-capture rate</a> to attribute its time to functions.</p>{{end}}
+<h2>Slow queries on this service</h2>
+{{if .Queries}}
+<p class="faint">A statement is not tied to one request yet, so this list covers the whole project in the range.</p>
+<table>
+<thead><tr><th scope="col">Statement</th><th scope="col">Calls</th><th scope="col">Total</th><th scope="col">Max</th><th scope="col">Last seen</th></tr></thead>
+<tbody>
+{{range .Queries}}<tr><td class="mono">{{.SQL}}</td><td class="num">{{.Count}}</td><td class="num nowrap">{{ms .TotalMs}}</td><td class="num nowrap">{{ms .MaxMs}}</td><td class="dim nowrap">{{rel .LastSeen}}</td></tr>{{end}}
+</tbody>
+</table>
+{{else}}<p class="empty">No slow statements in this range. <a href="/settings">Lower the capture threshold</a> to record them.</p>{{end}}
+{{end}}
