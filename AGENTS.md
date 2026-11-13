@@ -10,6 +10,14 @@ nothing when it is off, the whole thing is one binary you run yourself, and
 AGPL keeps hosted competitors honest. Licence split: see `LICENSE`,
 `NOTICE`, `CONTRIBUTING.md` and README's Licence section.
 
+### Tickets
+
+Tickets for this repo — including producer work and the consumer-repo adoption
+steps that finish a model — live in **`iniznet/nightpost` issues**. A PR lands
+in whichever repo holds the code and cites `Closes iniznet/nightpost#<n>`. The
+Fenrir Realm tracker is not the home for nightpost work; an adoption ticket
+opened there belongs here.
+
 ### Repo layout
 
 | Path | What lives there |

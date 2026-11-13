@@ -21,7 +21,7 @@
 <tbody>
 {{range .Rows}}
 <tr{{if eq .Status "missed"}} class="row-gap"{{end}}>
-  <td><span class="mono" title="{{.Name}}">{{trunc .Name 90}}</span> <span class="chip-note">{{.Project}}</span></td>
+  <td><a class="mono" href="/jobs/{{.Kind}}/{{pathEsc .Name}}" title="{{.Name}}">{{trunc .Name 90}}</a> <span class="chip-note">{{.Project}}</span></td>
   <td class="dim">{{.Kind}}{{if .Queue}} · {{.Queue}}{{end}}</td>
   <td class="mono">{{if .Cron}}{{.Cron}}{{else if .ExpectedNext}}<span class="dim">scheduled</span>{{else}}<span class="dim">registered by run</span>{{end}}</td>
   <td class="num">{{.Runs}}</td>
