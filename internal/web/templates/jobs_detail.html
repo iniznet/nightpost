@@ -1,0 +1,60 @@
+{{define "title"}}{{.Name}} — Jobs — nightpost{{end}}
+{{define "heading"}}<span class="mono">{{.Name}}</span>{{end}}
+{{define "content"}}
+{{template "perffilter" .}}
+<div class="perf">
+<p class="lead">One job: what it costs, where that cost sits, and the sampled runs behind the numbers. A run only appears here when the producer sampled it — the leaderboard row still holds the full run count.</p>
+<dl class="perf-stats">
+  <div><dt>Sampled runs</dt><dd class="num">{{.Detail.Count}}</dd></div>
+  <div><dt>p50</dt><dd class="num">{{ms .Detail.P50Ms}}</dd></div>
+  <div><dt>p95</dt><dd class="num">{{ms .Detail.P95Ms}}</dd></div>
+  <div><dt>p99</dt><dd class="num">{{ms .Detail.P99Ms}}</dd></div>
+  <div><dt>max</dt><dd class="num">{{ms .Detail.MaxMs}}</dd></div>
+</dl>
+{{if .Runs}}
+<h2>Where the time goes</h2>
+<p class="faint">Every span, summed across the {{.Detail.Count}} sampled runs. Share is of the sampled total, so this table answers “what always happens”, not “what happened once”.</p>
+{{if .Frames}}
+<table class="perf-table">
+<thead><tr><th scope="col">Span</th><th scope="col" class="num">Runs</th><th scope="col" class="num">Total</th><th scope="col" class="num">Avg</th><th scope="col" class="num">Share</th></tr></thead>
+<tbody>
+{{range .Frames}}
+<tr><td class="mono">{{.Name}}</td><td class="num">{{.Count}}</td><td class="num">{{ms .TotalMs}}</td><td class="num">{{ms .AvgMs}}</td><td class="num">{{frac .Share}}</td></tr>
+{{end}}
+</tbody>
+</table>
+{{else}}
+<p class="empty">The sampled runs reported no child spans — the producer is on a line that sends run timing only.</p>
+{{end}}
+{{if .Hotspots}}
+<h2>Hottest app frames</h2>
+<p class="faint">Self time per function, summed over the sampled runs. Framework frames stay out unless the run page is opened with <code class="mono">?frames=all</code>.</p>
+<table class="perf-table">
+<thead><tr><th scope="col">Function</th><th scope="col" class="num">Self</th><th scope="col" class="num">Calls</th></tr></thead>
+<tbody>
+{{range .Hotspots}}
+<tr><td class="mono" title="{{.File}}">{{.Function}}</td><td class="num">{{ms .SelfMs}}</td><td class="num">{{.Calls}}</td></tr>
+{{end}}
+</tbody>
+</table>
+{{end}}
+<h2>Sampled runs</h2>
+<table class="perf-table">
+<thead><tr><th scope="col">When</th><th scope="col" class="num">Duration</th><th scope="col">Slowest hop</th><th scope="col" class="num">Spans</th><th scope="col">Waterfall</th></tr></thead>
+<tbody>
+{{range .Runs}}
+<tr>
+  <td class="dim">{{when .At}}</td>
+  <td class="num">{{ms .Ms}}</td>
+  <td class="mono dim">{{if .TopSpan}}{{.TopSpan}} · {{ms .TopMs}}{{else}}—{{end}}</td>
+  <td class="num">{{.SpanN}}</td>
+  <td>{{if .Spanless}}<span class="dim">no spans</span>{{else if .TraceID}}<a href="/performance/requests/{{.TraceID}}">open</a>{{else}}<span class="dim">no trace id</span>{{end}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+{{else}}
+<p class="empty">No sampled run in this range. The producer reports one only when it samples a run (<code class="mono">NIGHTPOST_JOB_SPAN_RATE</code>, default 0.2%) — the leaderboard row above still counts every run.</p>
+{{end}}
+</div>
+{{end}}

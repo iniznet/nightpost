@@ -34,6 +34,6 @@
 </tbody>
 </table>
 <p class="faint">Coverage is reported hops over expected hops: <b>3/3</b> means every service in the chain answered. A dashed chip is a hop the callee never reported — open it for the producer guide.</p>
-{{else}}<p class="empty">No journeys in this range. A journey is materialised from spans, so a producer that only sends errors and profiles has no chain here yet. <a href="/keys">Copy the project key</a> and turn on span reporting.</p>{{end}}
+{{else}}{{if .Spanless}}<p class="empty">{{.Spanless}} profiles arrived in this range with <strong>no spans</strong> — a journey is materialised from spans, so a producer on the old line fills this page with nothing to draw. Upgrading the producer to v0.3.0 and setting <code class="mono">NIGHTPOST_SPANS=true</code> is the fix; <a href="/keys">the project key is already in place</a>.</p>{{else}}<p class="empty">No journeys in this range. A journey is materialised from spans, so a producer that only sends errors and profiles has no chain here yet. <a href="/keys">Copy the project key</a> and turn on span reporting.</p>{{end}}{{end}}
 </div>
 {{end}}

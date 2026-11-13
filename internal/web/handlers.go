@@ -314,6 +314,7 @@ type server struct {
 	request     *template.Template
 	releases    *template.Template
 	jobs        *template.Template
+	jobDetail   *template.Template
 	routePage   *template.Template
 	profile     *template.Template
 	trace       *template.Template
@@ -390,6 +391,7 @@ var funcMap = template.FuncMap{
 	"tl":    toolbarLink,
 	"delta": func(v float64) string { return fmt.Sprintf("%+.1f%%", v) },
 	"pct":   func(v, max float64) string { return strconv.FormatFloat(pctOf(v, max), 'f', 1, 64) },
+	"pathEsc": url.PathEscape,
 	"trunc": func(s string, n int) string {
 		r := []rune(s)
 		if len(r) <= n {
@@ -757,6 +759,7 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *A
 		request:     mustLayout("perf_request.html"),
 		releases:    mustLayout("releases.html"),
 		jobs:        mustLayout("jobs.html"),
+		jobDetail:   mustLayout("jobs_detail.html"),
 		routePage:   mustLayout("route.html"),
 		profile:     mustLayout("profile.html"),
 		trace:       mustLayout("trace.html"),
@@ -813,6 +816,7 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *A
 	page.HandleFunc("GET /performance/requests/{trace}", s.handleRequest)
 	page.HandleFunc("GET /releases", s.handleReleases)
 	page.HandleFunc("GET /jobs", s.handleJobs)
+	page.HandleFunc("GET /jobs/{kind}/{name}", s.handleJobDetail)
 	// Pre-merge bookmarks keep working: the profile and trace detail pages are
 	// deep links a report or an email may still carry.
 	page.HandleFunc("GET /performance/route", s.handleRouteByQuery)
@@ -1264,6 +1268,12 @@ func (s *server) handleJourneys(w http.ResponseWriter, r *http.Request) {
 		rows = kept
 	}
 	data["Rows"] = rows
+	// The honest empty state: a page with no journeys but thousands of profiles
+	// says how many arrived without a chain, because "nothing here" reads as a
+	// broken monitor when the real cause is a producer on the old line.
+	if n, err := s.st.SpanlessProfiles(f.Project, f.Hours()); err == nil {
+		data["Spanless"] = n
+	}
 	if err := s.journeys.ExecuteTemplate(w, "layout", data); err != nil {
 		log.Printf("render journeys: %v", err)
 	}
@@ -1477,6 +1487,9 @@ func (s *server) handleReleases(w http.ResponseWriter, r *http.Request) {
 	// The page therefore offers one real sample per project — the first trace of
 	// its slowest route — instead of a per-release link the data cannot back.
 	data["Samples"] = s.releaseSamples(rows, f.Hours())
+	if n, err := s.st.SpanlessProfiles(f.Project, f.Hours()); err == nil {
+		data["Spanless"] = n
+	}
 	if err := s.releases.ExecuteTemplate(w, "layout", data); err != nil {
 		log.Printf("render releases: %v", err)
 	}
