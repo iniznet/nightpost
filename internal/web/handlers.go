@@ -299,8 +299,11 @@ type SpanRow struct {
 // are methods so the section dispatchers (Errors, Performance) can delegate to
 // their tab handlers without duplicating logic.
 type server struct {
-	st     *store.Store
-	gate   *ingest.KeyGate
+	st   *store.Store
+	gate *ingest.KeyGate
+	// auth names the operator on a destructive request; nil on an install
+	// that runs without a login (the audit line then says so).
+	auth   *Auth
 	health IngestHealth
 	cors   originInvalidator
 
@@ -747,6 +750,7 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *A
 	s := &server{
 		st:          st,
 		gate:        gate,
+		auth:        auth,
 		dashboard:   mustLayout("dashboard.html"),
 		issues:      mustLayout("index.html"),
 		detail:      mustLayout("detail.html"),
@@ -825,6 +829,9 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *A
 	page.HandleFunc("GET /orgs", s.handleOrgs)
 	page.HandleFunc("POST /orgs/create", s.handleOrgCreate)
 	page.HandleFunc("POST /orgs/assign", s.handleOrgAssign)
+	page.HandleFunc("POST /orgs/project/purge", s.handleProjectPurge)
+	page.HandleFunc("POST /orgs/project/delete", s.handleProjectDelete)
+	page.HandleFunc("POST /orgs/org/delete", s.handleOrgDelete)
 	page.HandleFunc("GET /settings", s.handleSettings)
 	page.HandleFunc("POST /settings/save", s.handleSettingsSave)
 	page.HandleFunc("GET /keys", s.handleKeys)
@@ -1812,6 +1819,13 @@ func (s *server) renderOrgs(w http.ResponseWriter, r *http.Request, extra map[st
 	data["ProjectRows"] = projects
 	data["ProjectOrg"] = assign
 	data["DefaultOrgID"] = store.DefaultOrgID
+	// The danger zone: what a purge has done so far, and who asked for it.
+	if states, err := s.st.PurgeStates(); err == nil {
+		data["Purges"] = states
+	}
+	if audit, err := s.st.AdminActions(10); err == nil {
+		data["Audit"] = audit
+	}
 	for k, v := range extra {
 		data[k] = v
 	}

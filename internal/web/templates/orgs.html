@@ -5,6 +5,7 @@
 <p class="faint">An org groups projects. Assignment is additive: a project keeps its key and its producer configuration — only the dashboard projection changes. Every project not assigned here belongs to <b>Default</b>.</p>
 {{if .Flash}}<div class="flash">{{.Flash}}</div>{{end}}
 {{if .Error}}<p class="form-error">{{.Error}}</p>{{end}}
+{{if .Notice}}<p class="form-notice">{{.Notice}}</p>{{end}}
 <form class="filterbar" method="post" action="/orgs/create" id="new-org">
   <span class="label">new org</span>
   <input name="name" placeholder="Name" required>
@@ -28,10 +29,22 @@
 </tbody>
 </table>
 {{else}}<p class="empty">No orgs yet. <a href="#new-org">Create the first one</a>.</p>{{end}}
+{{if .Audit}}
+<h2>Recent destructive actions</h2>
+<p class="faint">Every request is recorded here, refused ones included — a purge with no audit line is a bug.</p>
+<table>
+<thead><tr><th scope="col">When</th><th scope="col">Actor</th><th scope="col">Action</th><th scope="col">Target</th><th scope="col">Detail</th></tr></thead>
+<tbody>
+{{range .Audit}}
+<tr><td class="dim">{{rel .CreatedAt}}</td><td class="mono dim">{{.Actor}}</td><td>{{.Action}}</td><td class="mono">{{.Target}}</td><td class="dim">{{.Detail}}</td></tr>
+{{end}}
+</tbody>
+</table>
+{{end}}
 <h2>Project assignment</h2>
 {{if .ProjectRows}}
 <table>
-<thead><tr><th scope="col">Project</th><th scope="col">Ingest key</th><th scope="col">Org</th><th scope="col"></th></tr></thead>
+<thead><tr><th scope="col">Project</th><th scope="col">Ingest key</th><th scope="col">Org</th><th scope="col"></th><th scope="col">Data</th></tr></thead>
 <tbody>
 {{range .ProjectRows}}
 <tr>
@@ -46,6 +59,21 @@
       </select>
   </td>
   <td><button type="submit">Move</button></form></td>
+  <td>
+    {{$p := index $.Purges .Key}}
+    {{if $p}}{{if $p.Done}}<span class="dim">last purge {{$p.Action}} finished · {{$p.Removed}} rows</span>{{else}}<span class="dim">purging ({{$p.Step}}/{{$p.Steps}}) · {{$p.Removed}} rows</span>{{end}}{{else}}
+    <form method="post" action="/orgs/project/purge" class="filterbar" style="margin:0">
+      <input type="hidden" name="project" value="{{.Key}}">
+      <input name="confirm" placeholder="type {{.Key}}" size="14" required>
+      <button type="submit" title="delete every event for this project, keep the project and its key">Clear data</button>
+    </form>
+    <form method="post" action="/orgs/project/delete" class="filterbar" style="margin:0">
+      <input type="hidden" name="project" value="{{.Key}}">
+      <input name="confirm" placeholder="type {{.Key}}" size="14" required>
+      <button type="submit" title="clear the data, then remove the project row">Delete</button>
+    </form>
+    {{end}}
+  </td>
 </tr>
 {{end}}
 </tbody>
