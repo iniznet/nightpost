@@ -490,6 +490,13 @@ func retentionLoop(st *store.Store, fallbackDays int, fallbackEvery time.Duratio
 			return
 		}
 		log.Print(msg)
+		// A requested purge drains here, one bounded statement per cycle: the
+		// request path never deletes rows (iniznet/nightpost#12).
+		if project, done, err := st.DrainPurgeStep(); err != nil {
+			log.Printf("purge: %v", err)
+		} else if project != "" {
+			log.Printf("purge %s: step drained (finished=%v)", project, done)
+		}
 	}
 	runOnce()
 	for {

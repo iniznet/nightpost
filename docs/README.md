@@ -57,3 +57,5 @@ GIF of static screens would add megabytes and show nothing the gallery above doe
 not. The onboarding path is the README quickstart, and that is verified: a clean
 directory, the real binary, the shipped container flags.
 
+
+- [architecture/retirement.md](architecture/retirement.md) — retiring a project or an org: what a purge deletes, why it is queued, and the guards.

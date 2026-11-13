@@ -373,6 +373,22 @@ func migrate(db *sql.DB) error {
 	accepted INTEGER,
 	error TEXT,
 	body BLOB)`},
+		{"purges", `CREATE TABLE IF NOT EXISTS purges (
+	project_key TEXT PRIMARY KEY,
+	action TEXT NOT NULL,
+	state TEXT NOT NULL DEFAULT 'queued',
+	step INTEGER NOT NULL DEFAULT 0,
+	removed INTEGER NOT NULL DEFAULT 0,
+	requested_at INTEGER NOT NULL,
+	requested_by TEXT NOT NULL DEFAULT '')`},
+		{"admin_actions", `CREATE TABLE IF NOT EXISTS admin_actions (
+	id INTEGER PRIMARY KEY,
+	actor TEXT NOT NULL DEFAULT '',
+	action TEXT NOT NULL,
+	target TEXT NOT NULL,
+	detail TEXT NOT NULL DEFAULT '',
+	created_at INTEGER NOT NULL)`},
+		{"idx_admin_actions", `CREATE INDEX IF NOT EXISTS idx_admin_actions ON admin_actions(created_at DESC)`},
 	} {
 		if _, err := db.Exec(m.stmt); err != nil {
 			// Idempotent: only "already applied" failures may pass through.

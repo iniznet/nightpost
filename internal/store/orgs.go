@@ -259,3 +259,15 @@ func slugify(s string) string {
 	}
 	return strings.Trim(b.String(), "-")
 }
+
+// DeleteOrg removes one org and its membership rows. Callers must prove the
+// org holds no projects: there is no cascade, on purpose (iniznet/nightpost#12).
+func (s *Store) DeleteOrg(id int64) error {
+	if _, err := s.wdb.Exec(`DELETE FROM org_members WHERE org_id = ?`, id); err != nil {
+		return fmt.Errorf("delete org members: %w", err)
+	}
+	if _, err := s.wdb.Exec(`DELETE FROM orgs WHERE id = ?`, id); err != nil {
+		return fmt.Errorf("delete org: %w", err)
+	}
+	return nil
+}
