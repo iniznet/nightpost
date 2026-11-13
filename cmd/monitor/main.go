@@ -46,7 +46,12 @@ func main() {
 	resetAdmin := flag.String("reset-admin", "", "one-shot: reset (or create) this admin email's password, write it to a 0600 file, and exit — never printed to the log")
 	resetAdminOut := flag.String("reset-admin-out", "", "where -reset-admin writes the minted password (default <db-dir>/admin-reset.txt, mode 0600)")
 	alertsConfig := flag.String("alerts-config", "", "path to alerts JSON (channels + rules); empty = alerting disabled")
+	fresh := flag.Bool("fresh", false, "delete the SQLite database files (including -wal/-shm) before opening, forcing a clean v2 schema rebuild (v1 data is dropped)")
 	flag.Parse()
+
+	if *fresh {
+		removeDBFiles(*dbPath)
+	}
 
 	st, err := store.Open(*dbPath)
 	if err != nil {
@@ -80,6 +85,7 @@ func main() {
 	sh := ingest.NewShaper(
 		st.SettingFloat(store.SettingIngestRate, *ingestRate),
 		st.SettingFloat(store.SettingIngestBurst, *ingestBurst),
+		ingest.WithSettings(st),
 	)
 	gate := ingest.NewKeyGate(st, 5*time.Second)
 	gate.ConfigureAutoProvision(*maxAutoProjects, *requireIngestKeys)
@@ -131,6 +137,7 @@ func main() {
 
 	go retentionLoop(st, *retentionDays, *pruneInterval)
 	go budgetLoop(st, sh, *ingestRate, *ingestBurst)
+	go derivedLoop(st)
 
 	mux := http.NewServeMux()
 	// route order: coarse guard → key gate → per-project shaper →
@@ -149,6 +156,12 @@ func main() {
 	mux.HandleFunc("POST /ingest/{project}/query", chain(ingest.PathProject, ingest.QueryHandler(st)))
 	mux.HandleFunc("POST /ingest/{project}/job", chain(ingest.PathProject, ingest.JobHandler(st)))
 	mux.HandleFunc("POST /ingest/{project}/release", chain(ingest.PathProject, ingest.ReleaseHandler(st)))
+	mux.HandleFunc("POST /ingest/{project}/session", chain(ingest.PathProject, ingest.SessionHandler(st)))
+	// OpenTelemetry collectors, JSON only. The collector is configured with ONE
+	// endpoint, so the project travels as ?project= instead of a path segment and
+	// falls back to the install's first project.
+	mux.HandleFunc("POST /v1/traces", chain(ingest.OTLPProject(st), ingest.TracesHandler(st)))
+	mux.HandleFunc("POST /v1/logs", chain(ingest.OTLPProject(st), ingest.LogsHandler(st)))
 	// Sentry SDK compatibility: sentry-laravel POSTs envelopes to /api/{id}/store.
 	mux.HandleFunc("POST /api/{project}/store", chain(ingest.PathProject, ingest.SentryHandler(st)))
 	mux.HandleFunc("POST /api/{project}/store/", chain(ingest.PathProject, ingest.SentryHandler(st)))
@@ -159,6 +172,9 @@ func main() {
 	mux.HandleFunc("POST /api/{project}/profiler/store", chain(ingest.XHProfProject, ingest.XHProfHandler(st)))
 	// Browser preflight for the first-party reporter endpoints.
 	mux.HandleFunc("OPTIONS /ingest/{project}/error", ingest.PreflightSource(cors.OriginFor))
+	// The session beacon is posted from the reader page, so its preflight is
+	// the same allowlist check the other browser emitters use.
+	mux.HandleFunc("OPTIONS /ingest/{project}/session", ingest.PreflightSource(cors.OriginFor))
 	mux.HandleFunc("OPTIONS /ingest/{project}/profile", ingest.PreflightSource(cors.OriginFor))
 	// Health contract. /up is LIVENESS — the process answers, and it
 	// deliberately never touches the database, so a sick store cannot get the
@@ -338,6 +354,19 @@ func logDBGuard(dbPath string) {
 	log.Printf("db mount: %s (%s) — persistent", m.dir, m.fstype)
 }
 
+// removeDBFiles deletes the database and its WAL/SHM sidecars before a
+// --fresh boot, so the v2 schema is created from scratch rather than by
+// additive migration over an older volume. Sidecars are removed first because
+// deleting the main file while a WAL still exists can resurrect stale pages.
+func removeDBFiles(dbPath string) {
+	for _, p := range []string{dbPath + "-wal", dbPath + "-shm", dbPath} {
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			log.Fatalf("fresh: remove %s: %v", p, err)
+		}
+	}
+	log.Printf("fresh: removed %s", dbPath)
+}
+
 // dbMount finds the deepest /proc/mounts entry containing the path's
 // directory; nil when it cannot be determined (non-Linux, unreadable file),
 // which callers treat as unknown rather than unsafe.
@@ -367,6 +396,46 @@ func pruneMinutes(d time.Duration) int {
 		m = 1
 	}
 	return m
+}
+
+const (
+	// journeysEvery is the cadence of the derived layer: journeys are materialised
+	// from spans, and missed scheduled runs are stamped, on the same tick.
+	journeysEvery = 5 * time.Minute
+	// journeysTrailing is the span window one pass covers. It is deliberately
+	// WIDER than the tick: a pass that fails, or a tick that slips, then leaves no
+	// hole in the materialised data, because the next pass re-reads the overlap.
+	journeysTrailing = 15 * time.Minute
+)
+
+// derivedLoop runs the derived layer once at boot and then on journeysEvery. It
+// owns both halves because they read the same image of the last few minutes:
+// journeys describe how a request travelled, the missed sweep describes the work
+// that never started, and a reader comparing the two must not see one lag the
+// other by a tick.
+func derivedLoop(st *store.Store) {
+	runOnce := func() {
+		now := time.Now()
+		if err := st.RecomputeJourneys(now.Add(-journeysTrailing), now); err != nil {
+			log.Printf("journeys: recompute: %v", err)
+		}
+		missed, err := st.MarkMissedJobs(now)
+		if err != nil {
+			log.Printf("jobs: missed sweep: %v", err)
+			return
+		}
+		if len(missed) > 0 {
+			// The missed_run rule fires off these stamps on the next dispatcher
+			// tick; the log line is what tells an operator the sweep ran at all.
+			log.Printf("jobs: %d scheduled run(s) missed", len(missed))
+		}
+	}
+	runOnce()
+	t := time.NewTicker(journeysEvery)
+	defer t.Stop()
+	for range t.C {
+		runOnce()
+	}
 }
 
 // ingestBudgetRefresh bounds how long a saved ingest_rate/ingest_burst can sit

@@ -34,6 +34,10 @@ Everything is off by default. Each line turns one sender on.
 | `NIGHTPOST_PROFILE_RATE` | deep code attribution samples |
 | `NIGHTPOST_SLOW_QUERY_MS` | the slow-query threshold |
 | `NIGHTPOST_JOB_CAPTURE` | queue/console job capture (batched; redacted by construction) |
+| `NIGHTPOST_SERVICE` | the service name every payload reports as (default: the `APP_NAME` slug) |
+| `NIGHTPOST_RELEASE` | the deploy id shipped on each session beacon |
+| `NIGHTPOST_SESSION_BEACON` | one session-outcome POST per session that ends (off by default) |
+| `NIGHTPOST_SPANS` | child spans for database, Redis and outbound HTTP on each request profile (off by default) |
 
 ## Three traps
 
@@ -49,9 +53,37 @@ Everything is off by default. Each line turns one sender on.
   When upgrading an older install, check the producer's env for a leftover
   observability sink before restarting it.
 
+## Journeys (v2)
+
+Four settings turn this deployment from an event source into a journey hop.
+
+- **Identity.** Every payload gains `service` and `env`.
+- `service` is `NIGHTPOST_SERVICE`, else the `APP_NAME` slug, else the project key.
+- `env` is the running app environment: one declaration, never a second to drift.
+- **Adopt.** A valid inbound `00-<32 hex>-<16 hex>-01` keeps its trace id.
+- **Own the hop.** This request mints its own span id; the caller's span id becomes the parent.
+- **Mint when unusable.** Missing, malformed, unsampled or a future version is minted here — never salvaged.
+- **Propagate.** The profile carries `traceparent` and `span_id`; the response echoes the same header.
+- **Child spans (`NIGHTPOST_SPANS`).** One span for database work, one for Redis, each a count plus total time.
+- Forty queries are one hop with a cost, not forty rows that bury the waterfall.
+- One span per outbound HTTP client call, capped at 20 per request, `peer_service` set to the target host.
+- Every `start_ms` is an offset from the request start, never a wall clock.
+- **Session beacon (`NIGHTPOST_SESSION_BEACON`).** One POST per session, keyed by the framework session id.
+- A retry updates that one row instead of counting the session twice. A 5xx reports `abnormal`.
+- A request without a session is skipped, never sent under an invented id. Needs a session driver.
+- `crashed` never reaches this route: a process that died has nobody left to send it.
+- **Scheduled runs.** The scheduled leg adds three fields to the `/job` row.
+- `schedule_cron` is the task's own expression; `next_expected_at` is the scheduler's own next-run time.
+- `grace_seconds` is the overlap window a mutex-guarded task declares, and 0 when unguarded.
+- Without those three, `/jobs` has a heartbeat and no promise.
+
 ## What arrives
 
 Errors and profiles land under the project you named; they show up on the
 dashboard, and a request profile whose trace id matches a callgraph's stitches
 the two into one waterfall. Send `traceparent` from anything upstream that
 already has a trace context and the legs join automatically.
+
+Read [../architecture/perf-model.md](../architecture/perf-model.md) when a
+journey arrives with fewer hops than you expect, and
+[../WIRE_SPEC.md](../../WIRE_SPEC.md) for every field this page names.

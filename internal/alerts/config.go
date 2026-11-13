@@ -18,7 +18,7 @@ type Config struct {
 
 type Channel struct {
 	ID           string   `json:"id"`
-	Type         string   `json:"type"` // "discord" | "email"
+	Type         string   `json:"type"` // "discord" | "email" | "slack" | "telegram" | "webhook"
 	Webhook      string   `json:"webhook"`
 	SMTPHost     string   `json:"smtp_host"`
 	SMTPUser     string   `json:"smtp_user"`
@@ -26,8 +26,14 @@ type Channel struct {
 	From         string   `json:"from"`
 	To           []string `json:"to"`
 	StartTLS     bool     `json:"starttls"`
-	HourlyCap    int      `json:"hourly_cap"`
-	DailyCeiling int      `json:"daily_ceiling"`
+	BotToken     string   `json:"bot_token"` // telegram: bot credential, from the mounted file
+	ChatID       string   `json:"chat_id"`   // telegram: destination chat or channel
+	// APIBase overrides the Telegram API host so a gateway, or a region where
+	// api.telegram.org is unreachable, can front the real API without a rebuild.
+	// Empty means the public host.
+	APIBase      string `json:"api_base"`
+	HourlyCap    int    `json:"hourly_cap"`
+	DailyCeiling int    `json:"daily_ceiling"`
 }
 
 type Rule struct {
@@ -41,9 +47,20 @@ type Rule struct {
 	Command         string   `json:"command"`          // heartbeat: command signature
 	CadenceSeconds  int64    `json:"cadence_seconds"`  // heartbeat: expected period
 	GraceMultiplier float64  `json:"grace_multiplier"` // heartbeat: alert after cadence x this (default 2)
+	// Points is how many earlier releases form the release_regression baseline;
+	// DropPoints is the crash-free drop from that baseline, in percentage points,
+	// that fires the rule.
+	Points     int     `json:"points"`
+	DropPoints float64 `json:"drop_points"`
 }
 
-var ruleTypes = map[string]bool{"new-issue": true, "regression": true, "count-window": true, "p95-latency": true, "heartbeat": true}
+// ruleTypes is the closed set a config may name. The five shipped ids keep their
+// hyphenated spelling because operator configs already reference them; the four
+// triggers this increment adds use the plan's own names.
+var ruleTypes = map[string]bool{
+	"new-issue": true, "regression": true, "count-window": true, "p95-latency": true, "heartbeat": true,
+	"missed_run": true, "query_slow": true, "span_unreported": true, "release_regression": true,
+}
 
 func LoadConfig(path string) (*Config, error) {
 	raw, err := os.ReadFile(path)
@@ -73,9 +90,16 @@ func (c *Config) validate() error {
 		}
 		seen[ch.ID] = true
 		switch ch.Type {
-		case "discord":
+		case "discord", "slack", "webhook":
 			if !strings.HasPrefix(ch.Webhook, "https://") && !strings.HasPrefix(ch.Webhook, "http://") {
 				return fmt.Errorf("alerts config: channel %q: webhook must be an http(s) URL", ch.ID)
+			}
+		case "telegram":
+			if ch.BotToken == "" || ch.ChatID == "" {
+				return fmt.Errorf("alerts config: channel %q: bot_token and chat_id are required", ch.ID)
+			}
+			if ch.APIBase != "" && !strings.HasPrefix(ch.APIBase, "https://") && !strings.HasPrefix(ch.APIBase, "http://") {
+				return fmt.Errorf("alerts config: channel %q: api_base must be an http(s) URL", ch.ID)
 			}
 		case "email":
 			if ch.SMTPHost == "" || ch.From == "" || len(ch.To) == 0 {
@@ -109,6 +133,14 @@ func (c *Config) validate() error {
 		case "heartbeat":
 			if r.Command == "" || r.CadenceSeconds <= 0 || len(r.Projects) == 0 {
 				return fmt.Errorf("alerts config: rule %d: heartbeat needs command, cadence_seconds and projects", i)
+			}
+		case "query_slow":
+			if r.ThresholdMs <= 0 {
+				return fmt.Errorf("alerts config: rule %d: query_slow needs a positive threshold_ms", i)
+			}
+		case "release_regression":
+			if r.DropPoints <= 0 {
+				return fmt.Errorf("alerts config: rule %d: release_regression needs a positive drop_points", i)
 			}
 		}
 	}

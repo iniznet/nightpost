@@ -219,6 +219,57 @@ docker compose exec monitor wget -qO- http://127.0.0.1:8000/ready
   outright: a stale `LOG_STACK` entry naming it now fails log resolution. Check
   producer env for a leftover sink entry when upgrading an older install.
 
+## Upgrading to schema v2 — `monitor --fresh`
+
+**Schema v2 is breaking.** A v1 volume is not migrated in place; `monitor --fresh`
+is the documented upgrade path. The journeys model adds services, routes, spans,
+journeys, journey_hops and sessions.
+
+`monitor --fresh` deletes the database files before it opens the store:
+
+| File | Why it goes, in this order |
+|---|---|
+| `monitor.db-wal` | sidecars first: deleting the main file while a WAL lives can resurrect stale pages |
+| `monitor.db-shm` | same reason, and it is gone before the file it shares |
+| `monitor.db` | the v1 schema itself |
+
+The next boot creates the v2 schema from scratch. Nothing is carried across.
+
+**What it destroys:**
+
+- every issue and every occurrence behind it;
+- every log line, every profile and every hotspot;
+- every slow-query aggregate, job row and release marker;
+- and with them the keys, organisations, admin users and saved settings.
+
+An install whose history matters does not run this command. Decide that before
+you type it, not after.
+
+Run it once, on an install whose data you have accepted losing:
+
+```sh
+# compose: stop first, so one writer owns the volume
+docker compose stop monitor
+docker compose run --rm monitor --fresh
+docker compose up -d
+
+# bare docker; the image's WORKDIR is /data, so -db defaults to the volume
+docker run --rm -v np-data:/data ghcr.io/iniznet/nightpost:latest --fresh
+
+# from source
+./monitor --fresh -db ./monitor.db
+```
+
+`--fresh` deletes, then boots normally. Both container forms above run the
+service in the foreground.
+
+Stop them with Ctrl-C at the ready line, then start the container for real.
+From source, the flag on a normal start is enough.
+
+- Use it when the volume predates v2, or when a store is corrupt past a restore.
+- Do not use it as a routine upgrade: later migrations are additive and run at boot.
+- A rollback is this same operation — the previous image against a fresh volume.
+
 ## Recovering access
 
 ```sh

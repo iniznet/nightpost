@@ -1,0 +1,103 @@
+{{define "title"}}{{.Info.Pattern}} — nightpost{{end}}
+{{define "heading"}}{{.Info.Pattern}}{{end}}
+{{define "content"}}
+{{template "perffilter" .}}
+<div class="perf">
+<p class="lead">{{if .Info.Service}}{{.Info.Service}} · {{.Info.Project}}{{else}}route{{end}} · the sections below run in the order a reader asks the questions, from the shape of the cost to the code behind it.</p>
+
+<section class="section">
+<h2><span class="n">1</span> Distribution</h2>
+<div class="kv-row">
+  <span><span class="k">requests</span> <span class="v">{{.Totals.Requests}}</span></span>
+  <span><span class="k">p50</span> <span class="v">{{if .Totals.Profiled}}{{ms .Totals.P50Ms}}{{else}}not profiled{{end}}</span></span>
+  <span><span class="k">p95</span> <span class="v em">{{ms .Totals.P95Ms}}</span></span>
+  <span><span class="k">max</span> <span class="v">{{if .Totals.Profiled}}{{ms .Totals.MaxMs}}{{else}}not profiled{{end}}</span></span>
+  <span><span class="k">total</span> <span class="v">{{if .Totals.Profiled}}{{ms .Totals.TotalMs}}{{else}}not profiled{{end}}</span></span>
+  <span><span class="k">coverage</span> <span class="v">{{if .Totals.Expected}}{{.Totals.Coverage}}{{else}}not walked{{end}}</span></span>
+</div>
+{{if .Slots}}
+<table class="perf-table">
+<thead><tr><th scope="col">Position in chain</th><th scope="col" class="num">Journeys</th><th scope="col" class="num">P95</th><th scope="col" class="num">Share of journey p95</th></tr></thead>
+<tbody>
+{{range .Slots}}<tr><td>hop {{.Position}}</td><td class="num">{{.Journeys}}</td><td class="num em">{{ms .P95Ms}}</td><td class="num">{{frac .SharePct}}</td></tr>{{end}}
+</tbody>
+</table>
+{{else}}<p class="empty">No journey walks this route in the window, so there is no position to describe.</p>{{end}}
+</section>
+
+<section class="section">
+<h2><span class="n">2</span> Journeys through it</h2>
+{{if .Rows}}
+<table class="perf-table">
+<thead><tr><th scope="col">Entry</th><th scope="col">Hop chain</th><th scope="col" class="num">Requests</th><th scope="col" class="num">P95</th><th scope="col" class="num">Coverage</th></tr></thead>
+<tbody>
+{{range .Rows}}<tr>
+  <td class="wrap"><span class="chip chip-svc">{{if .EntryService}}{{.EntryService}}{{else}}unknown service{{end}}</span> <span class="mono">{{.Entry}}</span></td>
+  <td>{{template "hopchain" .Hops}}</td>
+  <td class="num">{{.Requests}}</td>
+  <td class="num em">{{ms .P95Ms}}</td>
+  <td class="num">{{if .Total}}{{.Coverage}}{{else}}<span class="dim">no hops</span>{{end}}</td>
+</tr>{{end}}
+</tbody>
+</table>
+{{else}}<p class="empty">No journey walks this route in the window.</p>{{end}}
+</section>
+
+<section class="section">
+<h2><span class="n">3</span> Slowest samples</h2>
+{{if .Samples}}
+<table class="perf-table">
+<thead><tr><th scope="col">Trace</th><th scope="col" class="num">Services</th><th scope="col" class="num">Hops</th><th scope="col" class="num">End to end</th></tr></thead>
+<tbody>
+{{range .Samples}}<tr>
+  <td><a class="mono" href="{{tl $.Toolbar (printf "/performance/requests/%s" .TraceID)}}">{{.TraceID}}</a></td>
+  <td class="num">{{.Services}}</td>
+  <td class="num">{{.Hops}}</td>
+  <td class="num em">{{ms .TotalMs}}</td>
+</tr>{{end}}
+</tbody>
+</table>
+{{else}}<p class="empty">No profiled trace carried this route in the window. Spans alone name no sample to open.</p>{{end}}
+</section>
+
+<section class="section">
+<h2><span class="n">4</span> Queries</h2>
+{{if .Queries}}
+<table class="perf-table">
+<thead><tr><th scope="col">Statement</th><th scope="col" class="num">Calls</th><th scope="col" class="num">Max</th><th scope="col">Last seen</th></tr></thead>
+<tbody>
+{{range .Queries}}<tr><td class="mono wrap"><span class="sql-cell">{{.SQL}}</span></td><td class="num">{{.Count}}</td><td class="num">{{ms .MaxMs}}</td><td class="dim">{{rel .LastSeen}}</td></tr>{{end}}
+</tbody>
+</table>
+{{else}}<p class="empty">No slow statement recorded for this project in the window.</p>{{end}}
+</section>
+
+<section class="section">
+<h2><span class="n">5</span> Jobs</h2>
+{{if .Jobs}}
+<table class="perf-table">
+<thead><tr><th scope="col">Job</th><th scope="col">Kind</th><th scope="col" class="num">Runs</th><th scope="col" class="num">Failures</th><th scope="col" class="num">Avg</th><th scope="col">Last run</th></tr></thead>
+<tbody>
+{{range .Jobs}}<tr><td class="mono">{{.Name}}</td><td class="dim">{{.Kind}}</td><td class="num">{{.Runs}}</td><td class="num">{{.Failures}}</td><td class="num">{{ms .AvgMs}}</td><td class="dim">{{rel .LastRunAt}}</td></tr>{{end}}
+</tbody>
+</table>
+{{else}}<p class="empty">No job telemetry for this project in the window.</p>{{end}}
+</section>
+
+<section class="section">
+<h2><span class="n">6</span> Errors</h2>
+{{if .Issues}}
+<table class="perf-table">
+<thead><tr><th scope="col">Defect</th><th scope="col" class="num">Events</th><th scope="col">Last seen</th></tr></thead>
+<tbody>
+{{range .Issues}}<tr>
+  <td class="wrap"><a href="{{tl $.Toolbar (printf "/issues/%d" .ID)}}">{{.Title}}</a> <span class="dim mono">{{.Type}}</span></td>
+  <td class="num">{{.Count}}</td>
+  <td class="dim">{{rel .LastSeenAt}}</td>
+</tr>{{end}}
+</tbody>
+</table>
+{{else}}<p class="empty">No open defect for this project.</p>{{end}}
+</section>
+</div>
+{{end}}

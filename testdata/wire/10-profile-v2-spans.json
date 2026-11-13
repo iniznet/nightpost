@@ -1,0 +1,49 @@
+{
+  "spec": 1,
+  "name": "profile-v2-spans",
+  "transport": "http",
+  "route": "POST /ingest/{project}/profile",
+  "project": "wire",
+  "headers": {
+    "content-type": "application/json",
+    "traceparent": "00-22222222222222222222222222222222-00f067aa0ba902b7-01"
+  },
+  "body": {
+    "name": "GET /wire/1",
+    "duration_ms": 42,
+    "kind": "request",
+    "route": "GET /wire/{id}",
+    "spans": [
+      {
+        "span_id": "aaaaaaaaaaaaaaaa",
+        "name": "db",
+        "kind": "db",
+        "duration_ms": 9,
+        "start_ms": 1,
+        "status": "ok",
+        "route": "SELECT chapters"
+      },
+      {
+        "span_id": "bbbbbbbbbbbbbbbb",
+        "parent_span_id": "aaaaaaaaaaaaaaaa",
+        "name": "redis",
+        "kind": "cache",
+        "duration_ms": 2,
+        "start_ms": 10,
+        "status": "ok",
+        "route": "GET chapters",
+        "peer_service": "wire-cache"
+      }
+    ]
+  },
+  "expect": {
+    "status": 200,
+    "assert": "profile",
+    "trace": "22222222222222222222222222222222",
+    "count": 1,
+    "name": "GET /wire/1",
+    "duration_ms": 42,
+    "spans": 3,
+    "service": "wire"
+  }
+}

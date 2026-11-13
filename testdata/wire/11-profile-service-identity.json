@@ -1,0 +1,26 @@
+{
+  "spec": 1,
+  "name": "profile-service-identity",
+  "transport": "http",
+  "route": "POST /ingest/{project}/profile",
+  "project": "wire",
+  "headers": {
+    "content-type": "application/json"
+  },
+  "body": {
+    "name": "GET /feed",
+    "duration_ms": 12,
+    "trace_id": "wire-svc-trace",
+    "service": "wire-backend",
+    "env": "production"
+  },
+  "expect": {
+    "status": 200,
+    "assert": "profile",
+    "trace": "wire-svc-trace",
+    "count": 1,
+    "name": "GET /feed",
+    "duration_ms": 12,
+    "service": "wire-backend"
+  }
+}

@@ -1,26 +1,41 @@
 {{define "title"}}Jobs — nightpost{{end}}
-{{define "subtabs"}}{{template "tabsPerf" .}}{{end}}
-{{define "heading"}}Jobs &amp; commands{{end}}
+{{define "heading"}}Jobs{{end}}
 {{define "content"}}
-<p class="faint">Queue jobs and Artisan commands grouped by name over the last 7 days — cadence, outcome and a rolling 24h failure count. Payloads and arguments are never captured.</p>
+{{template "perffilter" .}}
+<div class="perf">
+<p class="lead">What runs, on what schedule, when it last ran, when it is next due, and whether the run that was promised ever arrived.</p>
 {{if .Rows}}
-<table>
-<thead><tr><th scope="col">Name</th><th scope="col">Kind</th><th scope="col">Queue</th><th scope="col">Last run</th><th scope="col">Status</th><th scope="col">Runs</th><th scope="col">Fails 24h</th><th scope="col">Avg</th><th scope="col">Last</th></tr></thead>
+<table class="perf-table">
+<thead><tr>
+  <th scope="col">Job</th>
+  <th scope="col">Kind</th>
+  <th scope="col">Schedule</th>
+  <th scope="col" class="num">Runs</th>
+  <th scope="col" class="num">Fails 24h</th>
+  <th scope="col" class="num">Avg</th>
+  <th scope="col" class="num">Last</th>
+  <th scope="col">Last run</th>
+  <th scope="col">Expected next</th>
+  <th scope="col">Status</th>
+</tr></thead>
 <tbody>
 {{range .Rows}}
-<tr>
-  <td class="mono" title="{{.Name}}">{{trunc .Name 90}}</td>
-  <td class="dim">{{.Kind}}</td>
-  <td class="mono dim">{{or .Queue "—"}}</td>
-  <td class="dim" title="{{.LastRunAt.Format "2006-01-02 15:04:05"}}">{{rel .LastRunAt}}</td>
-  <td><span class="badge lvl-{{if eq .LastStatus "ok"}}info{{else}}error{{end}}">{{.LastStatus}}</span></td>
+<tr{{if eq .Status "missed"}} class="row-gap"{{end}}>
+  <td><span class="mono" title="{{.Name}}">{{trunc .Name 90}}</span> <span class="chip-note">{{.Project}}</span></td>
+  <td class="dim">{{.Kind}}{{if .Queue}} · {{.Queue}}{{end}}</td>
+  <td class="mono">{{if .Cron}}{{.Cron}}{{else if .ExpectedNext}}<span class="dim">scheduled</span>{{else}}<span class="dim">registered by run</span>{{end}}</td>
   <td class="num">{{.Runs}}</td>
-  <td class="num">{{if .Failures24h}}{{.Failures24h}}{{else}}—{{end}}</td>
+  <td class="num {{if .Failures24h}}st-bad{{end}}">{{if .Failures24h}}{{.Failures24h}}{{else}}—{{end}}</td>
   <td class="num">{{ms .AvgMs}}</td>
   <td class="num">{{if .LastTrace}}<a href="/traces/{{.LastTrace}}" title="waterfall + call tree of the last profiled run">{{ms .LastMs}}</a>{{else}}{{ms .LastMs}}{{end}}</td>
+  <td class="dim" title="{{.LastRun.Format "2006-01-02 15:04:05"}}">{{if .LastRun.IsZero}}never{{else}}{{rel .LastRun}}{{end}}</td>
+  <td class="dim">{{if .ExpectedNext.IsZero}}<span class="dim">not registered</span>{{else}}{{when .ExpectedNext}}{{end}}</td>
+  <td>{{if eq .Status "missed"}}<span class="st st-bad">missed</span>{{else if eq .Status "failed"}}<span class="st st-warn">failed</span>{{else}}<span class="st st-ok">ok</span>{{end}}</td>
 </tr>
 {{end}}
 </tbody>
 </table>
-{{else}}<p class="empty">No job telemetry captured yet. <a href="{{tl .Toolbar "/performance"}}">Check endpoint latency meanwhile</a> — queue and command rows need <code class="mono">MONITOR_JOB_CAPTURE</code> on the producer.</p>{{end}}
+<p class="faint">A missed run is stamped by the ticker when the promise plus its own grace window passes without a run. A job that stops reporting stays on this page: the row is kept by the absence, not by the heartbeat. Payloads and arguments are never captured.</p>
+{{else}}<p class="empty">No job telemetry in this range. Turn on job capture on a producer (<code class="mono">MONITOR_JOB_CAPTURE</code>) and it will name its schedule here.</p>{{end}}
+</div>
 {{end}}

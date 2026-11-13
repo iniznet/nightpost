@@ -1,9 +1,12 @@
 package web
 
 import (
+	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
 	"html/template"
+	"io/fs"
 	"log"
 	"net/http"
 	"net/url"
@@ -18,8 +21,12 @@ import (
 	"github.com/iniznet/nightpost/internal/store"
 )
 
-//go:embed templates/*.html
-var templateFS embed.FS
+// assets carries the parsed templates and the one stylesheet. Serving both from
+// the binary keeps the deploy a single artefact: there is no static directory
+// to copy beside the executable, and no build step to run before the page works.
+//
+//go:embed templates/*.html templates/partials/*.html static/*
+var assets embed.FS
 
 // Page identifies the rendered page. The IA consolidates pages into two
 // sections (Errors, Performance); a page still names itself so the nav can
@@ -32,6 +39,10 @@ const (
 	PageIssues      Page = "issues"
 	PageLogs        Page = "logs"
 	PagePerformance Page = "performance"
+	PageRoutes      Page = "routes"
+	PageRouteDetail Page = "route"
+	PageRequest     Page = "request"
+	PageReleases    Page = "releases"
 	PageProfiles    Page = "profiles"
 	PageSlowest     Page = "slowest"
 	PageTraces      Page = "traces"
@@ -51,7 +62,7 @@ func (p Page) nav() string {
 	switch p {
 	case PageErrors, PageIssues, PageLogs:
 		return "errors"
-	case PagePerformance, PageProfiles, PageSlowest, PageTraces, PageTrace:
+	case PagePerformance, PageRoutes, PageRouteDetail, PageRequest, PageProfiles, PageSlowest, PageTraces, PageTrace:
 		return "performance"
 	case PageDashboard:
 		return "dashboard"
@@ -59,6 +70,8 @@ func (p Page) nav() string {
 		return "queries"
 	case PageJobs:
 		return "jobs"
+	case PageReleases:
+		return "releases"
 	case PageOrgs:
 		return "orgs"
 	case PageSettings:
@@ -78,8 +91,12 @@ func (p Page) section() string {
 		return "now"
 	case PageErrors, PageIssues, PageLogs:
 		return "errors"
-	case PagePerformance, PageProfiles, PageSlowest, PageTraces, PageTrace, PageQueries, PageJobs:
+	case PagePerformance, PageRoutes, PageRouteDetail, PageRequest, PageQueries:
 		return "performance"
+	case PageJobs:
+		return "jobs"
+	case PageReleases:
+		return "releases"
 	case PageKeys, PageOrgs, PageSettings:
 		return "configure"
 	}
@@ -110,6 +127,8 @@ func pageForPath(p string) Page {
 		return PageQueries
 	case strings.HasPrefix(p, "/jobs"):
 		return PageJobs
+	case strings.HasPrefix(p, "/releases"):
+		return PageReleases
 	case strings.HasPrefix(p, "/keys"):
 		return PageKeys
 	case strings.HasPrefix(p, "/orgs"):
@@ -289,12 +308,16 @@ type server struct {
 	issues      *template.Template
 	detail      *template.Template
 	logs        *template.Template
-	performance *template.Template
+	journeys    *template.Template
+	routeList   *template.Template
+	routeDetail *template.Template
+	request     *template.Template
+	releases    *template.Template
+	jobs        *template.Template
 	routePage   *template.Template
 	profile     *template.Template
 	trace       *template.Template
 	queries     *template.Template
-	jobs        *template.Template
 	keys        *template.Template
 	orgs        *template.Template
 	settings    *template.Template
@@ -374,6 +397,12 @@ var funcMap = template.FuncMap{
 		}
 		return string(r[:n]) + "…"
 	},
+	"spark40": func(points []float64) string { return sparkBox(points, 40, 16) },
+	"when":    relWhen,
+	"join":    strings.Join,
+	"frac":    func(v float64) string { return fmt.Sprintf("%.0f%%", v) },
+	"pct01":   func(v float64) string { return fmt.Sprintf("%.1f%%", v*100) },
+	"pctf":    func(v float64) string { return fmt.Sprintf("%.1f%%", v) },
 	"pcti": func(v, max int64) string {
 		if max <= 0 {
 			return "0.0"
@@ -417,6 +446,28 @@ func relTime(t time.Time) string {
 	}
 }
 
+// relWhen reads in both directions. A next-expected run sits in the future, and
+// a one-directional "3m ago" would print a scheduled job as already late.
+func relWhen(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	d := time.Until(t)
+	if d <= 0 {
+		return relTime(t)
+	}
+	switch {
+	case d < time.Minute:
+		return "in <1m"
+	case d < time.Hour:
+		return fmt.Sprintf("in %dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("in %dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("in %dd", int(d.Hours()/24))
+	}
+}
+
 // sparkPoints renders an SVG polyline points list, normalized to a 96x24 box.
 func sparkPoints(points []int64) string {
 	if len(points) < 2 {
@@ -443,7 +494,8 @@ func sparkPoints(points []int64) string {
 
 // mustLayout parses the shared layout with one page's content block.
 func mustLayout(page string) *template.Template {
-	return template.Must(template.New("layout").Funcs(funcMap).ParseFS(templateFS, "templates/base.html", "templates/"+page))
+	return template.Must(template.New("layout").Funcs(funcMap).ParseFS(assets,
+		"templates/base.html", "templates/partials/*.html", "templates/"+page))
 }
 
 // errorLayout renders a page-level failure inside the shell: the reader who
@@ -699,12 +751,16 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *A
 		issues:      mustLayout("index.html"),
 		detail:      mustLayout("detail.html"),
 		logs:        mustLayout("logs.html"),
-		performance: mustLayout("performance.html"),
+		journeys:    mustLayout("perf_journeys.html"),
+		routeList:   mustLayout("perf_routes.html"),
+		routeDetail: mustLayout("perf_route.html"),
+		request:     mustLayout("perf_request.html"),
+		releases:    mustLayout("releases.html"),
+		jobs:        mustLayout("jobs.html"),
 		routePage:   mustLayout("route.html"),
 		profile:     mustLayout("profile.html"),
 		trace:       mustLayout("trace.html"),
 		queries:     mustLayout("queries.html"),
-		jobs:        mustLayout("jobs.html"),
 		keys:        mustLayout("keys.html"),
 		orgs:        mustLayout("orgs.html"),
 		settings:    mustLayout("settings.html"),
@@ -712,6 +768,15 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *A
 	for _, o := range opts {
 		o(s)
 	}
+
+	// The stylesheet is served before the auth gate: the login and setup pages
+	// use the same layout, and a gate in front of the CSS would leave them
+	// unstyled exactly when a reader has no session yet.
+	staticFS, err := fs.Sub(assets, "static")
+	if err != nil {
+		panic("web: embed static subtree: " + err.Error())
+	}
+	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
 
 	page := http.NewServeMux()
 	if auth != nil {
@@ -737,15 +802,23 @@ func Register(mux *http.ServeMux, st *store.Store, gate *ingest.KeyGate, auth *A
 	page.HandleFunc("POST /issues/{id}/reopen", s.resolveHandler(false))
 	page.HandleFunc("GET /logs", s.handleLogs)
 
-	// Performance section: one route-first page (tracker #656). The five peer
-	// tabs it replaced shared no key, so a reader could not get from "this page
-	// is slow" to "this step is slow". Legacy paths land on the merged index.
-	page.HandleFunc("GET /performance", s.handlePerformance)
-	page.HandleFunc("GET /performance/route", s.handleRouteDetail)
+	// Performance section: six pages, one model. A journey is the unit, a route
+	// is a hop you can open, a request is one trace you can walk. The tabs the
+	// earlier layout kept (Overview / Queries / Jobs) no longer share a tab row:
+	// a route detail carries its own sections, while a statement shape and a
+	// queue drain keep pages of their own because neither outlives one route.
+	page.HandleFunc("GET /performance", s.handleJourneys)
+	page.HandleFunc("GET /performance/routes", s.handleRouteList)
+	page.HandleFunc("GET /performance/routes/{id}", s.handleRouteByID)
+	page.HandleFunc("GET /performance/requests/{trace}", s.handleRequest)
+	page.HandleFunc("GET /releases", s.handleReleases)
+	page.HandleFunc("GET /jobs", s.handleJobs)
+	// Pre-merge bookmarks keep working: the profile and trace detail pages are
+	// deep links a report or an email may still carry.
+	page.HandleFunc("GET /performance/route", s.handleRouteByQuery)
 	page.HandleFunc("GET /profiles/{id}", s.handleProfileDetail)
 	page.HandleFunc("GET /traces/{id}", s.handleTraceDetail)
 	page.HandleFunc("GET /queries", s.handleQueries)
-	page.HandleFunc("GET /jobs", s.handleJobs)
 	for _, legacy := range []string{"/profiles", "/traces", "/slowest"} {
 		page.HandleFunc("GET "+legacy, s.perfRedirect)
 	}
@@ -1072,34 +1145,6 @@ func (s *server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handlePerformance is the Performance-section dispatcher: Endpoints is the
-// default tab and an unknown tab resolves to it, never a 404.
-// handlePerformance is the merged Performance index (tracker #656). One table
-// answers two questions: which route costs the most wall clock, and did the
-// other service actually answer for it. The five peer tabs it replaced
-// (Endpoints / Traces / Hotspots / Queries / Jobs) shared no key, so a reader
-// could not walk from "this page is slow" to "this step is slow".
-func (s *server) handlePerformance(w http.ResponseWriter, r *http.Request) {
-	t := parseToolbar(r.URL.Query())
-	data := s.baseData(r, t, PagePerformance)
-	rows, err := s.st.RouteIndex(t.Project, t.Hours(), 50)
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	var maxTotal float64
-	for _, row := range rows {
-		if row.TotalMs > maxTotal {
-			maxTotal = row.TotalMs
-		}
-	}
-	data["Rows"] = rows
-	data["MaxTotal"] = maxTotal
-	if err := s.performance.ExecuteTemplate(w, "layout", data); err != nil {
-		log.Printf("render performance: %v", err)
-	}
-}
-
 // perfRedirect keeps every pre-merge bookmark alive: an old tab path lands on
 // the merged index with the scope it carried.
 func (s *server) perfRedirect(w http.ResponseWriter, r *http.Request) {
@@ -1108,6 +1153,379 @@ func (s *server) perfRedirect(w http.ResponseWriter, r *http.Request) {
 		target += "?" + q
 	}
 	http.Redirect(w, r, target, http.StatusFound)
+}
+
+// ---------------------------------------------------------------------------
+// Performance surface handlers: six pages over one model.
+// ---------------------------------------------------------------------------
+
+// perfData assembles the shell context the six performance pages share. The
+// shared filter bar replaces the global scope bar on these pages: one bar with
+// five dimensions beats two rows that would each carry half the state.
+func (s *server) perfData(r *http.Request, f perfFilter, page Page) map[string]any {
+	data := s.baseData(r, f.toolbar, page)
+	data["ScopeBar"] = false
+	data["Filter"] = f
+	data["EntrySpecs"] = entrySpecs
+	names := make([]string, 0, 4)
+	if list, err := s.st.Services(f.Project); err == nil {
+		for _, svc := range list {
+			names = append(names, svc.Name)
+		}
+	}
+	sort.Strings(names)
+	data["ServiceNames"] = names
+	return data
+}
+
+// routeInfo loads the route id -> pattern/service/runtime lookup the hop chips
+// print. Journeys carry route ids only, so this is one read of routes and one of
+// services per page instead of a lookup per chip.
+func (s *server) routeInfo() (map[int64]routeInfo, map[int64]store.Service, error) {
+	services, err := s.st.Services("")
+	if err != nil {
+		return nil, nil, err
+	}
+	byID := make(map[int64]store.Service, len(services))
+	for _, svc := range services {
+		byID[svc.ID] = svc
+	}
+	list, err := s.st.Routes(0)
+	if err != nil {
+		return nil, nil, err
+	}
+	routes := make(map[int64]routeInfo, len(list))
+	for _, rt := range list {
+		svc := byID[rt.ServiceID]
+		routes[rt.ID] = routeInfo{
+			Pattern: rt.Pattern, Method: rt.Method,
+			Service: svc.Name, Project: svc.ProjectKey, Runtime: svc.Runtime,
+		}
+	}
+	return routes, byID, nil
+}
+
+// journeyInputs reads materialised journeys with their hops and coverage. The
+// per-journey reads are bounded by the page's own row cap, which is the budget
+// the per-tab pages spent on profile reads before this layout.
+func (s *server) journeyInputs(project, entryKind string, limit int) ([]journeyInput, error) {
+	list, err := s.st.Journeys(project, entryKind, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]journeyInput, 0, len(list))
+	for _, j := range list {
+		hops, err := s.st.JourneyHops(j.ID)
+		if err != nil {
+			return nil, err
+		}
+		cov, err := s.st.JourneyCoverage(j.ID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, journeyInput{Journey: j, Hops: hops, Coverage: cov})
+	}
+	return out, nil
+}
+
+// projectFilter turns the bar's project into the store's project list: nil
+// means every project in scope, which is the convention every store reader uses.
+func (f perfFilter) projectFilter() []string {
+	if f.Project == "" {
+		return nil
+	}
+	return []string{f.Project}
+}
+
+// handleJourneys is /performance: which end-to-end paths exist, how slow they
+// are end-to-end, and which hop dominates each one.
+func (s *server) handleJourneys(w http.ResponseWriter, r *http.Request) {
+	f := parsePerfFilter(r.URL.Query())
+	data := s.perfData(r, f, PagePerformance)
+	data["Path"] = "/performance"
+	routes, _, err := s.routeInfo()
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	in, err := s.journeyInputs(f.Project, f.Entry, 50)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	rows := buildJourneyRows(in, routes)
+	if f.Service != "" {
+		kept := rows[:0]
+		for _, row := range rows {
+			if journeyHasService(row, f.Service) {
+				kept = append(kept, row)
+			}
+		}
+		rows = kept
+	}
+	data["Rows"] = rows
+	if err := s.journeys.ExecuteTemplate(w, "layout", data); err != nil {
+		log.Printf("render journeys: %v", err)
+	}
+}
+
+// handleRouteList is /performance/routes: which service's route is slow, and who
+// calls it.
+func (s *server) handleRouteList(w http.ResponseWriter, r *http.Request) {
+	f := parsePerfFilter(r.URL.Query())
+	data := s.perfData(r, f, PageRoutes)
+	data["Path"] = "/performance/routes"
+	routes, _, err := s.routeInfo()
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	in, err := s.journeyInputs(f.Project, f.Entry, 200)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	profiles, err := s.st.RouteIndex(f.Project, f.Hours(), 200)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	rows := buildRouteRows(buildJourneyRows(in, routes), profiles, routes)
+	if f.Service != "" {
+		kept := rows[:0]
+		for _, row := range rows {
+			if row.Service == f.Service {
+				kept = append(kept, row)
+			}
+		}
+		rows = kept
+	}
+	data["Rows"] = rows
+	if err := s.routeList.ExecuteTemplate(w, "layout", data); err != nil {
+		log.Printf("render routes: %v", err)
+	}
+}
+
+// handleRouteByID is /performance/routes/{id}: where the time goes on one route.
+// The sections run in that order — distribution, the journeys that walk it, the
+// slowest samples, then queries, jobs and errors — so a reader starts at the
+// shape of the cost and ends at the code that produced it.
+func (s *server) handleRouteByID(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		s.failStatus(w, r, http.StatusBadRequest, "bad route id")
+		return
+	}
+	route, err := s.st.RouteByID(id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			s.failStatus(w, r, http.StatusNotFound, "route not found")
+			return
+		}
+		s.fail(w, r, err)
+		return
+	}
+	f := parsePerfFilter(r.URL.Query())
+	data := s.perfData(r, f, PageRouteDetail)
+	data["Path"] = "/performance/routes"
+	routes, services, err := s.routeInfo()
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	info := routes[id]
+	project := info.Project
+	if project == "" {
+		project = f.Project
+	}
+	in, err := s.journeyInputs(project, f.Entry, 200)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	rows := buildJourneyRows(in, routes)
+	through := make([]JourneyRow, 0, len(rows))
+	for _, row := range rows {
+		if journeyHasRoute(row, info.Pattern) {
+			through = append(through, row)
+		}
+	}
+	// The route's own totals come from the same builder the list page uses, so
+	// the number a reader opened cannot disagree with the row they clicked.
+	var totals RouteRow
+	for _, row := range buildRouteRows(through, nil, routes) {
+		if row.Pattern == info.Pattern {
+			totals = row
+		}
+	}
+	data["Route"] = route
+	data["Info"] = info
+	data["Totals"] = totals
+	data["Rows"] = through
+	data["Slots"] = buildHopSlots(rows, info.Pattern)
+
+	ids, err := s.st.TraceIDsForRoute(project, info.Pattern, f.Hours(), 10)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	samples := make([]TraceSample, 0, len(ids))
+	for _, traceID := range ids {
+		spans, serr := s.st.TraceSpans(traceID)
+		if serr != nil {
+			s.fail(w, r, serr)
+			return
+		}
+		if len(spans) == 0 {
+			continue
+		}
+		view := buildRequestView(spans, services, nil)
+		samples = append(samples, TraceSample{TraceID: traceID, TotalMs: view.TotalMs, Hops: view.Hops, Services: view.Services})
+	}
+	sort.SliceStable(samples, func(i, j int) bool { return samples[i].TotalMs > samples[j].TotalMs })
+	data["Samples"] = samples
+
+	if q, qerr := s.st.QueryLeaderboard(project, f.Hours(), 10); qerr == nil {
+		data["Queries"] = q
+	}
+	if jobs, jerr := s.st.JobLeaderboard(project, f.Hours(), 10); jerr == nil {
+		data["Jobs"] = jobs
+	}
+	if issues, ierr := s.st.Issues(store.IssueQuery{
+		Project: project, Type: "error", Status: "open", Sort: "pain", Limit: 10,
+	}); ierr == nil {
+		data["Issues"] = issues
+	}
+	if err := s.routeDetail.ExecuteTemplate(w, "layout", data); err != nil {
+		log.Printf("render route detail: %v", err)
+	}
+}
+
+// journeyHasRoute reports whether a chain walks through one route pattern.
+func journeyHasRoute(row JourneyRow, pattern string) bool {
+	if pattern == "" {
+		return false
+	}
+	for _, h := range row.Hops {
+		if h.Route == pattern {
+			return true
+		}
+	}
+	return false
+}
+
+// handleRequest is /performance/requests/{trace}: what happened in one request.
+// The axis is the trace's own extent, so every row shares one scale and a nested
+// span is drawn inside its parent.
+func (s *server) handleRequest(w http.ResponseWriter, r *http.Request) {
+	traceID := r.PathValue("trace")
+	spans, err := s.st.TraceSpans(traceID)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	if len(spans) == 0 {
+		s.failStatus(w, r, http.StatusNotFound, "trace not found")
+		return
+	}
+	f := parsePerfFilter(r.URL.Query())
+	data := s.perfData(r, f, PageRequest)
+	data["Path"] = "/performance/requests/" + traceID
+	data["TraceID"] = traceID
+	_, services, err := s.routeInfo()
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	project := f.Project
+	if svc, ok := services[spans[0].ServiceID]; ok && project == "" {
+		project = svc.ProjectKey
+	}
+	// ?frames=all is the disclosure the plan fixes: the default attribution keeps
+	// application frames only, because a framework's own hot function is not a
+	// defect this reader can act on.
+	scope := store.HotspotAppFrames
+	all := r.URL.Query().Get("frames") == "all"
+	if all {
+		scope = store.HotspotAllFrames
+	}
+	frames, ferr := s.st.HotspotAttribution(project, scope, 20)
+	if ferr != nil {
+		log.Printf("attribution: %v", ferr)
+	}
+	data["AllFrames"] = all
+	data["Request"] = buildRequestView(spans, services, frames)
+	if err := s.request.ExecuteTemplate(w, "layout", data); err != nil {
+		log.Printf("render request: %v", err)
+	}
+}
+
+// handleReleases is /releases: which deploy, when it landed, and how much of the
+// fleet it is actually serving.
+func (s *server) handleReleases(w http.ResponseWriter, r *http.Request) {
+	f := parsePerfFilter(r.URL.Query())
+	data := s.perfData(r, f, PageReleases)
+	data["Path"] = "/releases"
+	points, err := s.st.ReleaseCrashPoints(f.projectFilter(), 20)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	rows := buildReleaseRows(points)
+	data["Rows"] = rows
+	// A release names a project, and no store read ties one trace to one release.
+	// The page therefore offers one real sample per project — the first trace of
+	// its slowest route — instead of a per-release link the data cannot back.
+	data["Samples"] = s.releaseSamples(rows, f.Hours())
+	if err := s.releases.ExecuteTemplate(w, "layout", data); err != nil {
+		log.Printf("render releases: %v", err)
+	}
+}
+
+// releaseSamples resolves one openable request per project on the Releases page.
+// The read is bounded by the number of projects in the window, not by releases.
+func (s *server) releaseSamples(rows []ReleaseRow, hours int) map[string]string {
+	out := make(map[string]string, len(rows))
+	for _, row := range rows {
+		if _, done := out[row.Project]; done {
+			continue
+		}
+		index, err := s.st.RouteIndex(row.Project, hours, 5)
+		if err != nil || len(index) == 0 {
+			continue
+		}
+		ids, err := s.st.TraceIDsForRoute(row.Project, index[0].Name, hours, 1)
+		if err != nil || len(ids) == 0 {
+			continue
+		}
+		out[row.Project] = ids[0]
+	}
+	return out
+}
+
+// handleJobs is /jobs: what is scheduled, when it last ran, when it is due, and
+// whether the run that was promised ever arrived.
+func (s *server) handleJobs(w http.ResponseWriter, r *http.Request) {
+	f := parsePerfFilter(r.URL.Query())
+	data := s.perfData(r, f, PageJobs)
+	data["Path"] = "/jobs"
+	// The service dimension is carried by the shared bar but cannot narrow a job
+	// row: job_stats keys a run by (project, kind, name) and carries no service
+	// identity, so filtering here would hide rows the store cannot attribute.
+	jobs, err := s.st.JobLeaderboard(f.Project, f.Hours(), 200)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	missed, err := s.st.MissedJobs(f.projectFilter())
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	data["Rows"] = buildJobRows(jobs, missed)
+	if err := s.jobs.ExecuteTemplate(w, "layout", data); err != nil {
+		log.Printf("render jobs: %v", err)
+	}
 }
 
 // StepRow is one row of a request's front -> other service walk. Kind drives
@@ -1175,9 +1593,10 @@ type RouteTraceRow struct {
 	Steps    []StepRow
 }
 
-// handleRouteDetail is the drill-down: the last traces of one route, each an
-// ordered walk with bar widths, so the waterfall needs no client script.
-func (s *server) handleRouteDetail(w http.ResponseWriter, r *http.Request) {
+// handleRouteByQuery is the pre-#657 drill-down: /performance/route?route=…
+// lands on the same walk an old bookmark carried, before route detail moved to
+// an id-addressed section page.
+func (s *server) handleRouteByQuery(w http.ResponseWriter, r *http.Request) {
 	t := parseToolbar(r.URL.Query())
 	route := strings.TrimSpace(r.URL.Query().Get("route"))
 	project := strings.TrimSpace(r.URL.Query().Get("project"))
@@ -1361,21 +1780,6 @@ func (s *server) handleQueries(w http.ResponseWriter, r *http.Request) {
 	data["MaxTotal"] = maxTotal
 	if err := s.queries.ExecuteTemplate(w, "layout", data); err != nil {
 		log.Printf("render queries: %v", err)
-	}
-}
-
-// handleJobs is its own page for the same reason: a queue drain is not a route.
-func (s *server) handleJobs(w http.ResponseWriter, r *http.Request) {
-	t := parseToolbar(r.URL.Query())
-	data := s.baseData(r, t, PageJobs)
-	aggs, err := s.st.JobLeaderboard(t.Project, t.Hours(), 200)
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	data["Rows"] = aggs
-	if err := s.jobs.ExecuteTemplate(w, "layout", data); err != nil {
-		log.Printf("render jobs: %v", err)
 	}
 }
 

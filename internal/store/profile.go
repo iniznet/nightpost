@@ -112,6 +112,14 @@ type ProfileInput struct {
 	Spans       []Span
 	Hotspots    []Hotspot
 	Tree        []TreeNode
+	// v2 identity columns: the service that reported the leg, the route it
+	// named, the span that stands for the profile itself in the trace
+	// waterfall, and the profile kind. Zero/empty means "not reported" and
+	// lands as NULL('') rather than a phantom row 0.
+	ServiceID int64
+	RouteID   int64
+	SpanID    string
+	Kind      string
 }
 
 func (s *Store) RecordProfile(in ProfileInput) (int64, error) {
@@ -124,10 +132,16 @@ func (s *Store) RecordProfile(in ProfileInput) (int64, error) {
 	if len(in.Hotspots) > maxProfileHotspots {
 		in.Hotspots = in.Hotspots[:maxProfileHotspots]
 	}
-	res, err := s.wdb.Exec(`INSERT INTO profiles (project_key, type, name, duration_ms, environment, trace_id, spans, hotspots, tree, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	if in.Kind == "" {
+		in.Kind = "request"
+	}
+	res, err := s.wdb.Exec(`INSERT INTO profiles
+		(project_key, type, name, duration_ms, environment, trace_id, spans, hotspots, tree, created_at,
+		 service_id, route_id, span_id, kind)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		in.ProjectKey, in.Type, truncate(in.Name, 240), in.DurationMs, in.Environment, truncate(in.TraceID, 64),
-		marshalJSON(in.Spans), marshalJSON(in.Hotspots), marshalJSON(in.Tree), time.Now().Unix())
+		marshalJSON(in.Spans), marshalJSON(in.Hotspots), marshalJSON(in.Tree), time.Now().Unix(),
+		nullableID(in.ServiceID), nullableID(in.RouteID), truncate(in.SpanID, 32), in.Kind)
 	if err != nil {
 		return 0, err
 	}

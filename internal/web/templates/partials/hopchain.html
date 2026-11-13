@@ -1,0 +1,43 @@
+{{/*
+  Two partials for the performance surface, kept in one file because both are
+  the same kind of thing: markup that must be identical on every page that
+  shows it. Duplicating either one per page is how a filter silently loses a
+  dimension and how a gap chip turns back into a bare dash.
+*/}}
+
+{{/* perffilter is the one filter bar: project, service, env, range, entry. It
+     is a plain GET form, so it works with JavaScript disabled, and org rides
+     along as a hidden field so the scope a reader arrived with is never
+     dropped (#526). */}}
+{{define "perffilter"}}<form class="filterbar perffilter" method="get" action="{{.Path}}" aria-label="Filters">
+  <input type="hidden" name="org" value="{{.Toolbar.Org}}">
+  <label class="flabel" for="pf-project">project</label>
+  <select id="pf-project" name="project">
+    <option value="">all projects</option>
+    {{range .Projects}}<option value="{{.}}"{{if eq $.Toolbar.Project .}} selected{{end}}>{{.}}</option>{{end}}
+  </select>
+  <label class="flabel" for="pf-service">service</label>
+  <select id="pf-service" name="service">
+    <option value="">all services</option>
+    {{range .ServiceNames}}<option value="{{.}}"{{if eq $.Filter.Service .}} selected{{end}}>{{.}}</option>{{end}}
+  </select>
+  <label class="flabel" for="pf-env">env</label>
+  <select id="pf-env" name="env">
+    <option value="">all envs</option>
+    {{range .Envs}}<option value="{{.}}"{{if eq $.Toolbar.Env .}} selected{{end}}>{{.}}</option>{{end}}
+  </select>
+  <label class="flabel" for="pf-range">range</label>
+  <select id="pf-range" name="range">
+    {{range .Ranges}}<option value="{{.Key}}"{{if eq $.Toolbar.Range .Key}} selected{{end}}>{{.Label}}</option>{{end}}
+  </select>
+  <label class="flabel" for="pf-entry">entry</label>
+  <select id="pf-entry" name="entry">
+    {{range .EntrySpecs}}<option value="{{.Key}}"{{if eq $.Filter.Entry .Key}} selected{{end}}>{{.Label}}</option>{{end}}
+  </select>
+  <button class="apply" type="submit">Apply</button>
+</form>{{end}}
+
+{{/* hopchain renders a journey as chips separated by an arrow. An unreported
+     hop is a dashed LINK naming the producer that owes it: never blank, never a
+     bare dash, because an absence the reader can act on is the whole point. */}}
+{{define "hopchain"}}<span class="hops">{{range $i, $h := .}}{{if $i}}<span class="hop-arrow" aria-hidden="true">→</span>{{end}}{{if $h.Gap}}<a class="chip hop-gap" href="{{$h.Doc}}" title="not reported by {{$h.Service}}{{if not $h.Service}}the callee{{end}}">{{$h.Label}}<span class="chip-note">not reported</span></a>{{else}}<span class="chip{{if eq $h.Status "error"}} chip-err{{end}}" title="{{$h.Service}}{{if $h.P95Ms}} · p95 {{ms $h.P95Ms}}{{end}}">{{$h.Label}}</span>{{end}}{{end}}</span>{{end}}

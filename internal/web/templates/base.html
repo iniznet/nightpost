@@ -202,6 +202,7 @@ summary::marker{color:var(--faint)}
   .card,.rank{border-radius:8px}
 }
 </style>
+<link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
@@ -213,6 +214,8 @@ summary::marker{color:var(--faint)}
       <a href="{{tl .Toolbar "/"}}"{{if eq .Section "now"}} aria-current="page"{{end}}>Now</a>
       <a href="{{tl .Toolbar "/errors"}}"{{if eq .Section "errors"}} aria-current="page"{{end}}>Errors</a>
       <a href="{{tl .Toolbar "/performance"}}"{{if eq .Section "performance"}} aria-current="page"{{end}}>Performance</a>
+      <a href="{{tl .Toolbar "/releases"}}"{{if eq .Section "releases"}} aria-current="page"{{end}}>Releases</a>
+      <a href="{{tl .Toolbar "/jobs"}}"{{if eq .Section "jobs"}} aria-current="page"{{end}}>Jobs</a>
       <a href="{{tl .Toolbar "/keys"}}"{{if eq .Section "configure"}} aria-current="page"{{end}}>Configure</a>
     </nav>{{end}}
     <div class="bar-right">

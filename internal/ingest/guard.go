@@ -4,6 +4,7 @@ import (
 	"net"
 	"net/http"
 	"sort"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -126,6 +127,17 @@ func (g *IngressGuard) evictIPsLocked() {
 func (g *IngressGuard) GlobalRejections() int64 { return g.globalRejected.Load() }
 func (g *IngressGuard) IPRejections() int64     { return g.ipRejected.Load() }
 
+// writeRetryAfter answers a 429 with the wait the producer should honour.
+// A ceiling without it leaves clients guessing between an immediate retry that
+// compounds the flood and a backoff so long it loses data, so every refusal
+// path names its wait.
+func writeRetryAfter(w http.ResponseWriter, seconds int) {
+	if seconds < 1 {
+		seconds = 1
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(seconds))
+}
+
 // ClientIP resolves the source address the guard keys on. It deliberately
 // IGNORES X-Forwarded-For: that header is caller-controlled, so honouring it
 // would hand an attacker a fresh per-address bucket per request — the exact
@@ -148,7 +160,7 @@ func WithIngressGuard(g *IngressGuard, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ok, leg := g.Allow(ClientIP(r))
 		if !ok {
-			w.Header().Set("Retry-After", "1")
+			writeRetryAfter(w, 1)
 			http.Error(w, "ingest rate ceiling reached ("+leg+")", http.StatusTooManyRequests)
 			return
 		}

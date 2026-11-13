@@ -99,10 +99,12 @@ func TestRoutesRenderWithData(t *testing.T) {
 		t.Error("logs page missing channel")
 	}
 
-	resp, _ = http.Get(srv.URL + "/profiles?project=backend&type=request")
+	// Profiles are read as routes now: the merged Performance index is the
+	// journey list, and a profile lands on the Routes page.
+	resp, _ = http.Get(srv.URL + "/performance/routes?project=backend")
 	body = readAll(t, resp)
 	if !strings.Contains(body, "GET /chapters/123") {
-		t.Error("profiles page missing seeded profile")
+		t.Error("routes page missing seeded profile")
 	}
 }
 

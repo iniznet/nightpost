@@ -1,0 +1,88 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          { "key": "service.name", "value": { "stringValue": "wire-front" } },
+          { "key": "deployment.environment", "value": { "stringValue": "production" } }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": { "name": "wire.front" },
+          "spans": [
+            {
+              "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+              "spanId": "aaaaaaaaaaaaaaaa",
+              "name": "GET /chapters/[id]",
+              "kind": 2,
+              "startTimeUnixNano": "1700000000000000000",
+              "endTimeUnixNano": "1700000000120000000",
+              "status": { "code": 1 },
+              "attributes": [
+                { "key": "http.route", "value": { "stringValue": "GET /chapters/[id]" } }
+              ]
+            },
+            {
+              "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+              "spanId": "bbbbbbbbbbbbbbbb",
+              "parentSpanId": "aaaaaaaaaaaaaaaa",
+              "name": "GET /api/chapter",
+              "kind": 3,
+              "startTimeUnixNano": "1700000000020000000",
+              "endTimeUnixNano": "1700000000060000000",
+              "status": { "code": 2 },
+              "attributes": [
+                { "key": "http.route", "value": { "stringValue": "GET /api/chapter" } },
+                { "key": "peer.service", "value": { "stringValue": "wire-backend" } },
+                { "key": "retry", "value": { "boolValue": true } }
+              ]
+            },
+            {
+              "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+              "spanId": "eeeeeeeeeeeeeeee",
+              "parentSpanId": "aaaaaaaaaaaaaaaa",
+              "name": "GET /api/ads",
+              "kind": 3,
+              "startTimeUnixNano": "1700000000070000000",
+              "endTimeUnixNano": "1700000000080000000",
+              "status": { "code": 0 },
+              "attributes": [
+                { "key": "http.route", "value": { "stringValue": "GET /api/ads" } },
+                { "key": "peer.service", "value": { "stringValue": "wire-ads" } }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "resource": {
+        "attributes": [
+          { "key": "service.name", "value": { "stringValue": "wire-backend" } },
+          { "key": "deployment.environment.name", "value": { "stringValue": "production" } }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": { "name": "wire.backend" },
+          "spans": [
+            {
+              "traceId": "4bf92f3577b34da6a3ce929d0e0e4736",
+              "spanId": "cccccccccccccccc",
+              "parentSpanId": "bbbbbbbbbbbbbbbb",
+              "name": "GET /api/chapter",
+              "kind": 2,
+              "startTimeUnixNano": "1700000000025000000",
+              "endTimeUnixNano": "1700000000055000000",
+              "status": { "code": 1 },
+              "attributes": [
+                { "key": "http.route", "value": { "stringValue": "GET /api/chapter" } }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

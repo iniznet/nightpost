@@ -1,0 +1,39 @@
+{{define "title"}}Routes — nightpost{{end}}
+{{define "heading"}}Routes{{end}}
+{{define "content"}}
+{{template "perffilter" .}}
+<div class="perf">
+<p class="lead">Every route in scope, by service. Open one to see where its time goes: the distribution across the chain, the journeys that walk it, the slowest samples, and the queries, jobs and errors behind it.</p>
+{{if .Rows}}
+<table class="perf-table">
+<thead><tr>
+  <th scope="col">Service</th>
+  <th scope="col">Route</th>
+  <th scope="col" class="num">Requests</th>
+  <th scope="col" class="num">P50</th>
+  <th scope="col" class="num">P95</th>
+  <th scope="col" class="num">Max</th>
+  <th scope="col">Called by</th>
+  <th scope="col" class="num">Calls</th>
+  <th scope="col" class="num">Coverage</th>
+</tr></thead>
+<tbody>
+{{range .Rows}}
+<tr>
+  <td><span class="chip chip-svc">{{if .Service}}{{.Service}}{{else}}{{.Project}}{{end}}</span></td>
+  <td>{{if .RouteID}}<a class="mono" href="{{tl $.Toolbar (printf "/performance/routes/%d" .RouteID)}}">{{.Pattern}}</a>{{else}}<span class="mono">{{.Pattern}}</span>{{end}}</td>
+  <td class="num">{{.Requests}}</td>
+  <td class="num">{{if .Profiled}}{{ms .P50Ms}}{{else}}<span class="dim">not profiled</span>{{end}}</td>
+  <td class="num em">{{ms .P95Ms}}</td>
+  <td class="num">{{if .Profiled}}{{ms .MaxMs}}{{else}}<span class="dim">not profiled</span>{{end}}</td>
+  <td>{{if .CalledBy}}<span class="mono">{{join .CalledBy ", "}}</span>{{else}}<span class="dim">entry</span>{{end}}</td>
+  <td class="num">{{.Calls}}</td>
+  <td class="num">{{if .Expected}}<span class="{{if ge .Covered .Expected}}{{else}}cov-miss{{end}}">{{.Coverage}}</span>{{else}}<span class="dim">not walked</span>{{end}}</td>
+</tr>
+{{end}}
+</tbody>
+</table>
+<p class="faint">Called by names the services whose journeys reach this route as a hop. Coverage is journeys through it that reported every hop, over journeys through it. A route with no profile in the window shows <b>not profiled</b> rather than a latency nobody measured.</p>
+{{else}}<p class="empty">No routes in this range. A route appears when a producer names one on a span or a profile.</p>{{end}}
+</div>
+{{end}}

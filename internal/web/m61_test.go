@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 // everyRoute is the page surface with ZERO query params. It is the I1
@@ -95,7 +96,7 @@ func TestLegacyRoutesServeConsolidatedContent(t *testing.T) {
 
 	// The three route-performance paths merged into one page (#656). A bookmark
 	// must land on the merged index with its scope, never on a 404. Queries and
-	// Jobs are their own pages again (#658), so they are not in this list.
+	// Jobs are their own pages (#658), so they are not in this list.
 	for _, legacy := range []string{"/profiles?project=backend&type=request", "/traces?project=backend", "/slowest?project=backend"} {
 		client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 		resp, err := client.Get(srv.URL + legacy)
@@ -188,15 +189,18 @@ func TestTracesIndexAndDeepLink(t *testing.T) {
 	readAll(t, resp)
 }
 
-
 // Invariant: the Performance section is ONE merged route view plus two sibling
 // pages (#658). Merging the route pages must not swallow the statement and
 // queue surfaces, and a reader inside a route still sees which tab they are in.
-func TestPerformanceTabsCarryThreeSiblings(t *testing.T) {
+// The Performance section keeps sibling pages (journeys, routes, queries, jobs)
+// instead of a tab strip: each answers its own question, and the navigation
+// marks the reader's current one. #656 merged the route views; #658 kept
+// queries and jobs as pages because neither belongs to one route.
+func TestPerformanceSectionsRenderTheirOwnPage(t *testing.T) {
 	srv, st := newTestServer(t)
 	seedUI(t, st)
 	cases := []struct{ path, current string }{
-		{"/performance", "Overview"},
+		{"/performance", "Performance"},
 		{"/queries", "Queries"},
 		{"/jobs", "Jobs"},
 	}
@@ -208,11 +212,6 @@ func TestPerformanceTabsCarryThreeSiblings(t *testing.T) {
 		body := readAll(t, resp)
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("GET %s: status %d, want 200", c.path, resp.StatusCode)
-		}
-		for _, tab := range []string{"Overview", "Queries", "Jobs"} {
-			if !strings.Contains(body, ">"+tab+"</a>") {
-				t.Errorf("GET %s: tab %q missing from the strip", c.path, tab)
-			}
 		}
 		if want := `aria-current="page">` + c.current; !strings.Contains(body, want) {
 			t.Errorf("GET %s: %q is not marked current", c.path, c.current)
@@ -241,6 +240,14 @@ func TestQueriesPageRendersLeaderboard(t *testing.T) {
 func TestJobsPageRendersLeaderboard(t *testing.T) {
 	srv, st := newTestServer(t)
 	seedUI(t, st)
+	// A job row only exists once a producer reports one: job_stats keys on
+	// (project, kind, name), so seeding an error or a profile cannot stand in.
+	if err := st.RecordJob("backend", "command", "quests:reset-stale-progress", "", 3.2, true, 1, ""); err != nil {
+		t.Fatalf("seed job: %v", err)
+	}
+	if err := st.SetJobSchedule("backend", "command", "quests:reset-stale-progress", "*/5 * * * *", time.Now().Add(time.Hour).Unix(), 300); err != nil {
+		t.Fatalf("seed schedule: %v", err)
+	}
 	resp, err := http.Get(srv.URL + "/jobs?project=backend")
 	if err != nil {
 		t.Fatalf("GET /jobs: %v", err)
@@ -249,7 +256,12 @@ func TestJobsPageRendersLeaderboard(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status %d, want 200", resp.StatusCode)
 	}
-	if !strings.Contains(body, "Jobs &amp; commands") {
-		t.Error("the jobs page lost its heading")
+	// The page's contract is the promise each run makes: its schedule and the
+	// time it is next due, beside the outcome. A leaderboard without those two
+	// columns cannot answer the missed-run question.
+	for _, want := range []string{"Schedule", "Expected next", "Fails 24h"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("the jobs page lost its %q column", want)
+		}
 	}
 }

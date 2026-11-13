@@ -1,0 +1,25 @@
+{
+  "spec": 1,
+  "name": "job-service-identity",
+  "transport": "http",
+  "route": "POST /ingest/{project}/job",
+  "project": "wire",
+  "headers": {
+    "content-type": "application/json"
+  },
+  "body": {
+    "name": "wire:sync-chapters",
+    "kind": "command",
+    "seconds": 1.5,
+    "ok": true,
+    "service": "wire-worker",
+    "env": "production"
+  },
+  "expect": {
+    "status": 202,
+    "assert": "job",
+    "kind": "command",
+    "name": "wire:sync-chapters",
+    "service": "wire-worker"
+  }
+}
